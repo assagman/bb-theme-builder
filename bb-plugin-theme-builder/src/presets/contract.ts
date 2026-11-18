@@ -1,6 +1,6 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { generationMethods } from "../generation/contract.ts";
+import { chatMethods, generationMethods } from "../generation/contract.ts";
 import {
   draftSchema,
   idSchema,
@@ -25,6 +25,7 @@ const appearanceOutcomeSchema = z.discriminatedUnion("kind", [
 
 export const rpcContract = defineRpcContract({
   ...generationMethods,
+  ...chatMethods,
   listPresets: {
     input: z.strictObject({}),
     output: z

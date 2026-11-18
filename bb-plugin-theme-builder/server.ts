@@ -2,11 +2,18 @@ import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { createAppearanceService } from "./src/appearance/service.ts";
 import { createGenerationJobs } from "./src/generation/jobs.ts";
 import {
+  chatSweeperService,
+  createChatSessions,
+} from "./src/generation/session.ts";
+import {
   defaultSelection,
   runGenerationThread,
 } from "./src/generation/thread.ts";
 import { rpcContract } from "./src/presets/contract.ts";
 import { createPresetStore } from "./src/presets/store.ts";
+
+// Background service name; one sweeper per plugin load ends chats whose page went away.
+const CHAT_SWEEPER = "chat-sweeper";
 
 export default function plugin(bb: BbPluginApi) {
   const store = createPresetStore(bb.storage.kv);
@@ -14,7 +21,10 @@ export default function plugin(bb: BbPluginApi) {
   const generation = createGenerationJobs((input, signal) =>
     runGenerationThread(bb, input, signal),
   );
+  const chat = createChatSessions(bb, bb.storage.kv);
+  bb.background.service(CHAT_SWEEPER, chatSweeperService(bb, chat));
   bb.onDispose(async () => {
+    await chat.close();
     await generation.close();
     await appearance.close();
     await store.close();
@@ -27,6 +37,12 @@ export default function plugin(bb: BbPluginApi) {
       generation.cancel(requestId);
       return {};
     },
+    chatStart: chat.start,
+    chatSend: chat.send,
+    chatGet: chat.get,
+    chatStop: chat.stop,
+    chatEnd: chat.end,
+    chatPing: chat.ping,
     listPresets: () => store.list(),
     getPreset: ({ id }) => store.get(id),
     savePreset: (input) => store.save(input),

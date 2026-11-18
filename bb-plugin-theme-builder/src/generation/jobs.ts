@@ -4,6 +4,7 @@ import {
   type GenerationResult,
 } from "./contract.ts";
 import { parseGeneratedPalette } from "./palette.ts";
+import { raceSignal, settleWithin } from "./timeouts.ts";
 
 const FAILED =
   "Generation failed. Check that the selected provider is signed in and available, then try again.";
@@ -63,12 +64,6 @@ export function createGenerationJobs(
     current = job;
     active = true;
     const timer = setTimeout(() => job.controller.abort(), timeoutMs);
-    // The SDK cannot abort every transport; user-visible completion must not depend on transport cooperation.
-    let abort!: () => void;
-    const aborted = new Promise<never>((_resolve, reject) => {
-      abort = () => reject(job.controller.signal.reason);
-      job.controller.signal.addEventListener("abort", abort, { once: true });
-    });
     job.task = Promise.resolve().then(async () => {
       try {
         const runner = Promise.resolve().then(() => {
@@ -84,7 +79,8 @@ export function createGenerationJobs(
         void settled.then(() => {
           runners.delete(settled);
         });
-        const text = await Promise.race([runner, aborted]);
+        // The SDK cannot abort every transport; user-visible completion must not depend on transport cooperation.
+        const text = await raceSignal(runner, job.controller.signal);
         job.controller.signal.throwIfAborted();
         job.result = {
           kind: "ready",
@@ -96,7 +92,6 @@ export function createGenerationJobs(
           : failed(job.controller.signal.aborted ? TIMEOUT : FAILED);
       } finally {
         clearTimeout(timer);
-        job.controller.signal.removeEventListener("abort", abort);
         job.expiresAt = Date.now() + RESULT_RETENTION_MS;
         active = false;
       }
@@ -131,17 +126,7 @@ export function createGenerationJobs(
         cancel(current.id);
         await current.task;
       }
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([
-          Promise.allSettled([...runners]),
-          new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, disposalTimeoutMs);
-          }),
-        ]);
-      } finally {
-        clearTimeout(timer);
-      }
+      await settleWithin(Promise.allSettled([...runners]), disposalTimeoutMs);
     },
   };
 }
