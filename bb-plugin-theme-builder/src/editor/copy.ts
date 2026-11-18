@@ -16,8 +16,18 @@ export const COPY = {
   tabLabels: { ai: "AI", edit: "Edit", randomize: "Randomize" },
   aiPlaceholder:
     "Describe the theme you want, then keep talking to the agent to tweak it. Coming soon.",
-  randomizePlaceholder:
-    "Pick an accent and get a full theme instantly. Coming soon.",
+  randomizeIntro:
+    "Pick an accent, or leave it blank, and get a full theme instantly. Roll again until one fits.",
+  accentLabel: "Accent",
+  accentPickerLabel: "Accent color",
+  accentPlaceholder: "Optional, e.g. #7c3aed",
+  accentInvalid: "Use a six-digit hex color like #7c3aed, or leave it blank.",
+  randomizeFailed: "Could not generate a theme. Try again.",
+  randomize: "Randomize",
+  rollBack: "Back",
+  rollForward: "Forward",
+  editThis: "Edit this",
+  refineWithAi: "Refine with AI",
   editingMode: "Editing colors for",
   actionBarLabel: "Theme actions",
   statusBuiltIn: "Built-in theme",

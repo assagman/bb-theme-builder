@@ -14,9 +14,9 @@ import type { rpcContract } from "../presets/contract.ts";
 import { paletteOf } from "../theme/schema.ts";
 import type { ThemeDraft } from "../theme/tokens.ts";
 import { describeError } from "./describe-error.ts";
+import { LOG_PREFIX } from "./log.ts";
 import { useEditorField } from "./store.ts";
 
-const LOG_PREFIX = "[theme-builder]";
 const NO_CHAT: ChatState = { kind: "none" };
 const EMPTY_MESSAGE = "Write a message before sending.";
 const NO_SESSION_MESSAGE = "There is no open conversation.";

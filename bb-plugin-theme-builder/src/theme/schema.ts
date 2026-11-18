@@ -4,6 +4,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_PRESET_BYTES,
   MAX_REVISION,
+  MODES,
   SCHEMA_VERSION,
   type ThemeDraft,
   type ThemePreset,
@@ -61,6 +62,16 @@ export function toDraft(preset: ThemePreset): ThemeDraft {
 /** The two palettes of a theme, the part an agent reply or checkpoint replaces; fonts and name stay with the draft. */
 export function paletteOf(draft: Pick<ThemeDraft, "light" | "dark">) {
   return { light: draft.light, dark: draft.dark };
+}
+
+/** Token-wise palette equality, because palettes reach the page from sources (zod, stored JSON, generators) that order keys differently. */
+export function samePalette(
+  a: Pick<ThemeDraft, "light" | "dark">,
+  b: Pick<ThemeDraft, "light" | "dark">,
+): boolean {
+  return MODES.every((mode) =>
+    TOKEN_KEYS.every((key) => a[mode][key] === b[mode][key]),
+  );
 }
 
 // Fixed field and token order, because drafts reach the page from sources (defaults, zod, stored JSON) that order keys differently.

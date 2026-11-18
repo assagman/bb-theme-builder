@@ -9,6 +9,8 @@ import { COPY } from "./copy.ts";
 import { EditTab } from "./EditTab.tsx";
 import { Notices } from "./Notices.tsx";
 import { PreviewFrame } from "./PreviewFrame.tsx";
+import { RandomizeTab } from "./RandomizeTab.tsx";
+import { EMPTY_ROLL_HISTORY } from "./roll-history.ts";
 import { useBuilderState } from "./state.ts";
 import type { Tab } from "./store.ts";
 import { TabPanel, Tabs } from "./Tabs.tsx";
@@ -29,17 +31,26 @@ export function BuilderPage() {
   const state = useBuilderState();
   // Bumped when the working theme is replaced by one with the same bar key, so a half-filled name form cannot outlive it.
   const [barEpoch, setBarEpoch] = useState(0);
+  // Lives here, not in the tab, so rolls survive switching tabs.
+  const [rollHistory, setRollHistory] = useState(EMPTY_ROLL_HISTORY);
+  // Held here too, so the accent the user typed survives tab switches.
+  const [accent, setAccent] = useState("");
+  // Whenever the working theme is replaced, its rolls no longer belong to the new one even if a palette happens to match.
+  const resetRolls = () => setRollHistory(EMPTY_ROLL_HISTORY);
   const { draft, mode, setMode, tab, setTab } = state;
   const valid = draftSchema.safeParse(draft).success;
   const builtInOpen = state.saved === null && !state.dirty;
   // The state layer never prompts, so every path that would drop edits asks here.
   const confirmDiscard = () => !state.dirty || window.confirm(COPY.discard);
   const discard = () => {
-    if (confirmDiscard()) state.discard();
+    if (!confirmDiscard()) return;
+    resetRolls();
+    state.discard();
   };
   const createTheme = () => {
     if (!confirmDiscard()) return;
     setBarEpoch((value) => value + 1);
+    resetRolls();
     state.newTheme();
   };
   const status = state.dirty
@@ -58,7 +69,18 @@ export function BuilderPage() {
         onChange={state.setDraft}
       />
     ),
-    randomize: () => <p className="tb-hint">{COPY.randomizePlaceholder}</p>,
+    randomize: () => (
+      <RandomizeTab
+        draft={draft}
+        busy={state.busy}
+        accent={accent}
+        onAccent={setAccent}
+        history={rollHistory}
+        onHistory={setRollHistory}
+        onChange={state.setDraft}
+        onTab={setTab}
+      />
+    ),
   };
   const entries: ThemeEntry[] = [
     {
@@ -115,7 +137,7 @@ export function BuilderPage() {
             disabled={state.busy}
             onSelect={(id) => {
               setBarEpoch((value) => value + 1);
-              state.select(id);
+              if (state.select(id)) resetRolls();
             }}
           />
         </section>
@@ -165,9 +187,12 @@ export function BuilderPage() {
           onRename={state.rename}
           onDuplicate={() => {
             setBarEpoch((value) => value + 1);
+            resetRolls();
             state.duplicate();
           }}
-          onDelete={state.remove}
+          onDelete={() => {
+            if (state.remove()) resetRolls();
+          }}
           onExport={state.download}
           onRestore={() => state.restore()}
           onUseDefault={() => state.restore(true)}

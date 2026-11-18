@@ -8,8 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { BbPluginApi, PluginKvStorage } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { createSerialExecutor } from "../presets/serial.ts";
-import { idSchema } from "../theme/schema.ts";
-import { TOKEN_KEYS } from "../theme/tokens.ts";
+import { idSchema, samePalette } from "../theme/schema.ts";
 import {
   accentSchema,
   CHAT_ENDED_MESSAGE,
@@ -119,13 +118,6 @@ type Deliver = (signal: AbortSignal) => Promise<string>;
 type TurnOutcome =
   | { ok: true; reply: ParsedReply }
   | { ok: false; message: string };
-
-// Token-wise comparison, because key order in client JSON is not meaningful.
-function samePalette(a: GeneratedPalette, b: GeneratedPalette): boolean {
-  return TOKEN_KEYS.every(
-    (key) => a.light[key] === b.light[key] && a.dark[key] === b.dark[key],
-  );
-}
 
 function recordBytes(record: SessionRecord): number {
   return new TextEncoder().encode(JSON.stringify(record)).byteLength;

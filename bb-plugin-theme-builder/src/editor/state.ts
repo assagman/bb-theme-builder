@@ -13,6 +13,7 @@ import {
 import { COPY } from "./copy.ts";
 import { describeError } from "./describe-error.ts";
 import { useDraftPersistence } from "./draft-persistence.ts";
+import { LOG_PREFIX } from "./log.ts";
 import { useEditorField } from "./store.ts";
 
 export { TABS, type Tab } from "./store.ts";
@@ -60,7 +61,7 @@ export function useBuilderState() {
     try {
       await refreshAppearance();
     } catch (cause) {
-      console.warn("[theme-builder] appearance refresh failed", {
+      console.warn(`${LOG_PREFIX} appearance refresh failed`, {
         operation,
         cause: describeError(cause),
       });
@@ -129,8 +130,9 @@ export function useBuilderState() {
     return result.preset;
   }
 
-  function select(id: string) {
-    if (dirty && !window.confirm(COPY.discard)) return;
+  /** Returns false when the user declined the discard prompt, so the page can keep state tied to the unchanged theme. */
+  function select(id: string): boolean {
+    if (dirty && !window.confirm(COPY.discard)) return false;
     void run(async () => {
       if (id === "") {
         setSaved(null);
@@ -143,6 +145,7 @@ export function useBuilderState() {
       }
       await refreshList();
     });
+    return true;
   }
 
   /** Throws the unsaved edits away, back to the saved preset or the neutral starter. */
@@ -181,12 +184,13 @@ export function useBuilderState() {
     setNotice(null);
   }
 
-  function remove() {
+  /** Returns false when nothing was deleted because the prompt was declined, so the page keeps the roll trail. */
+  function remove(): boolean {
     if (
       saved === null ||
       !window.confirm(dirty ? COPY.confirmDeleteDirty : COPY.confirmDelete)
     )
-      return;
+      return false;
     void run(async () => {
       const result = await rpc.call("deletePreset", {
         id: saved.id,
@@ -198,6 +202,7 @@ export function useBuilderState() {
       setMessage(COPY.deleted);
       await refreshList();
     });
+    return true;
   }
 
   function download(format: ExportFormat) {

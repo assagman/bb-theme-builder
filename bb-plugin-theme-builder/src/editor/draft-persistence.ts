@@ -13,9 +13,9 @@ import {
   loadStoredDraft,
   saveStoredDraft,
 } from "./draft-storage.ts";
+import { LOG_PREFIX } from "./log.ts";
 import { type Notice, readEditor, useEditorField } from "./store.ts";
 
-const LOG_PREFIX = "[theme-builder]";
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
 /**
  * `pending` until the stored draft was considered, `ready` afterwards, and

@@ -312,3 +312,17 @@
     margin-top: 24px;
   }
 }
+
+/* Accent row has no contrast badge, so the hex field takes the badge's room instead of cutting its placeholder. */
+.tb-token--accent {
+  grid-template-columns: minmax(0, auto) 40px minmax(0, 1fr);
+}
+/* Same text-safe red as failing badges: the plain destructive token is a fill color and can miss contrast on the page background. */
+.tb-field-error {
+  color: var(--destructive-text);
+}
+.tb-roll-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
