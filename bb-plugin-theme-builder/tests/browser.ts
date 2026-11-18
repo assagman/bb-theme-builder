@@ -6,6 +6,10 @@ const POLL_MS = 100;
 const BLANK_URL = "about:blank";
 const CONNECT_ERROR = "Could not connect to the test browser";
 const CLOSED_ERROR = "The test browser disconnected";
+const SCREENSHOT_METHOD = "Page.captureScreenshot";
+const FOREGROUND_METHOD = "Page.bringToFront";
+const PAINT_SETTLED_EXPRESSION =
+  "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))";
 class BrowserTransportError extends Error {
   constructor(message: string, cause?: unknown) {
     super(message, { cause });
@@ -154,7 +158,15 @@ export class Page {
     this.sessionId = sessionId;
     this.contextId = contextId;
   }
-  send<T = Record<string, unknown>>(method: string, params = {}) {
+  async send<T = Record<string, unknown>>(
+    method: string,
+    params = {},
+  ): Promise<T> {
+    if (method === SCREENSHOT_METHOD) {
+      // Opaque iframe styles can update before compositor paint; proof must capture the visible, current frame.
+      await this.browser.send(FOREGROUND_METHOD, {}, this.sessionId);
+      await this.evaluate(PAINT_SETTLED_EXPRESSION);
+    }
     return this.browser.send<T>(method, params, this.sessionId);
   }
   async evaluate<T = unknown>(expression: string): Promise<T> {
