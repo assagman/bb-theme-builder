@@ -1,26 +1,34 @@
 # Theme Builder
 
-Build a personal light/dark palette from bb’s sidebar. Adjust colors and local
-font choices beside an isolated representative preview, with contrast feedback
-for both modes. Save, duplicate, rename, and delete presets. Export saved JSON
-and CSS.
+Build a personal light/dark theme from bb’s sidebar. Your themes are cards at
+the top of the page. Three tabs change the open theme, and one action bar saves
+and applies it.
 
-**Randomize** generates both palettes with your chosen bb provider/model.
-Optionally describe the theme in plain words and lock an accent hex; review the
-unsaved result and undo it before saving. The last model selection is remembered
-in this browser. Generation uses a personal bb agent thread, normal provider
-usage, and a three-minute deadline; its archived history is retained. Cancel and
-failures preserve your draft. See README for permissions and recovery details.
+- **AI**: describe the theme in plain words, then keep talking to an agent to
+  tweak it. It uses your chosen bb provider and model. Normal provider usage
+  applies, each answer has a three-minute deadline, and the archived thread
+  stays in bb’s history.
+- **Edit**: change colors and local fonts by hand. Colors are in groups, and
+  each color shows its contrast ratio next to it.
+- **Randomize**: pick an accent, or none, and get a full theme at once. Roll
+  again, and use **Back** and **Forward** to compare. It needs no model and
+  sends nothing to a provider.
 
-Editing stays local. **Apply saves and changes every bb window**, preserving
-each window’s light/dark preference and favicon selection. **Restore previous
-theme** offers one-step recovery and refuses an already-observed later
+An isolated **Preview** shows the draft in both modes. In the action bar,
+**Save** keeps the theme without changing appearance. **Apply** saves it and
+changes every bb window, preserving each window’s light/dark preference and
+favicon selection. A new theme asks for a name first. **More actions** has
+rename, duplicate, delete, JSON and CSS export, and **Restore previous theme**.
+Restore offers one-step recovery and refuses an already-observed later
 appearance choice. Changed custom or plugin source files cannot silently become
 a restore target. The public SDK cannot atomically exclude simultaneous
 Settings/CLI changes.
 
-Presets survive restart. Generated themes survive disabling the plugin; deleting
-a preset retains applied artifacts. Each Apply creates a small CSS file;
+Unsaved changes survive a reload. The page restores them and shows a notice
+with a **Discard** button. See README for permissions and recovery details.
+
+Themes survive restart. Generated themes survive disabling the plugin; deleting
+a theme retains applied artifacts. Each Apply creates a small CSS file;
 automatic pruning is deferred. System fonts can differ across devices. Code
 syntax uses bb’s default fallback, and the preview does not represent a live
 session.

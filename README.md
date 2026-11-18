@@ -1,10 +1,10 @@
 # Theme Builder
 
-A BB plugin for independent light and dark palettes. Edit colors and system
-fonts, review an isolated preview, save presets, and export JSON or CSS. Apply a
-palette across BB windows, then restore the previous appearance. The optional
-randomizer uses a configured model and preserves explicit Save and Apply
-actions.
+A BB plugin for independent light and dark themes. Pick a theme from your list,
+then build it with the **AI**, **Edit**, or **Randomize** tab. Review an
+isolated preview, then **Save** or **Apply** from one action bar. Apply a theme
+across BB windows, then restore the previous appearance. Export JSON or CSS.
+Unsaved changes survive a reload. Only the AI tab needs a configured model.
 
 The implementation is in [`bb-plugin-theme-builder/`](bb-plugin-theme-builder/).
 Read the [user and recovery guide](bb-plugin-theme-builder/README.md) before
@@ -75,8 +75,8 @@ Never point verification commands at a production instance.
 
 The complete checks include lint, types, existing tests, duplication, dependency
 advisories, build, shell analysis, static analysis, Markdown lint, and browser
-smoke. Real randomizer checks are separate because they require configured model
-access and incur normal usage charges:
+smoke for the main journey and the Randomize tab. The Randomize journey needs
+no model. To run it alone:
 
 ```sh
 cd bb-plugin-theme-builder
