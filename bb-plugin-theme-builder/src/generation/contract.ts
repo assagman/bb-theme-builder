@@ -18,7 +18,8 @@ const MAX_SELECTION_LENGTH = 200;
 export const MAX_DESCRIPTION_LENGTH = 600;
 // Control, format (bidi, zero-width), and line/paragraph separator characters could forge or hide prompt structure, so only visible text and plain newlines pass.
 const CONTROL_CHARACTERS = /(?!\n)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
-const ACCENT_PATTERN = /^#[0-9a-fA-F]{6}$/;
+// Exported so local generation rejects exactly the accents the schema rejects.
+export const ACCENT_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const selectionString = z.string().min(1).max(MAX_SELECTION_LENGTH);
 export const accentSchema = z
   .string()
