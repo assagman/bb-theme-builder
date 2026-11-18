@@ -1,11 +1,10 @@
 # Theme Builder
 
 A BB plugin for independent light and dark palettes. Edit colors and system
-fonts,
-review an isolated preview, save presets, and export JSON or CSS. Apply a
-palette
-across BB windows, then restore the previous appearance. The optional randomizer
-uses a configured model and preserves explicit Save and Apply actions.
+fonts, review an isolated preview, save presets, and export JSON or CSS. Apply a
+palette across BB windows, then restore the previous appearance. The optional
+randomizer uses a configured model and preserves explicit Save and Apply
+actions.
 
 The implementation is in [`bb-plugin-theme-builder/`](bb-plugin-theme-builder/).
 Read the [user and recovery guide](bb-plugin-theme-builder/README.md) before
@@ -13,10 +12,10 @@ installation.
 
 ## Development
 
-Development takes place directly on `main` . Do not create feature branches or
-pull
-requests unless the owner requests them. Keep changes focused. Sign every commit
-with DCO and include a Conventional Commit subject and a purpose-focused body.
+Development takes place directly on `main`. Do not create feature branches or
+pull requests unless the owner requests them. Keep changes focused. Sign every
+commit with DCO and include a Conventional Commit subject and a purpose-focused
+body.
 
 Use Node 24 LTS, npm, BB, and the tools below:
 
@@ -57,8 +56,7 @@ versions. `.npmrc` enforces a seven-day release age on supporting npm versions.
 
 For the complete checks, first start the disposable server and browser described
 in the
-[browser verification guide](bb-plugin-theme-builder/README.md#browser-verification)
-.
+[browser verification guide](bb-plugin-theme-builder/README.md#browser-verification).
 Set their actual values before running this command from the repository root:
 
 ```sh
@@ -77,9 +75,8 @@ Never point verification commands at a production instance.
 
 The complete checks include lint, types, existing tests, duplication, dependency
 advisories, build, shell analysis, static analysis, Markdown lint, and browser
-smoke.
-Real randomizer checks are separate because they require configured model access
-and incur normal usage charges:
+smoke. Real randomizer checks are separate because they require configured model
+access and incur normal usage charges:
 
 ```sh
 cd bb-plugin-theme-builder
@@ -92,22 +89,17 @@ npm run smoke:randomizer
   formatting and lint against an indexed copy rather than unstaged content.
 - `commit-msg` requires the commit convention, a body, and DCO.
 - `pre-push` verifies signatures, DCO, messages, and secrets for outgoing
-  commits.
-Shared checks also scan changed lockfile revisions, source, and function
-  complexity.
-  Project checks run the complete suite once for each distinct pushed tip.
+  commits. Shared checks also scan changed lockfile revisions, source, and
+  function complexity. Project checks run the complete suite once for each
+  distinct pushed tip.
 
 A missing tool, scanner error, unavailable test environment, or failed check
-blocks
-commit or push. Never bypass hooks or add an advisory exception to finish
-delivery.
-Historical lockfiles can block a push even after the current tip receives a fix.
-Rewriting unpublished history requires owner approval. Never rewrite published
-history or force-push `main`.
+blocks commit or push. Never bypass hooks or add an advisory exception to finish
+delivery. Historical lockfiles can block a push even after the current tip
+receives a fix. Rewriting unpublished history requires owner approval. Never
+rewrite published history or force-push `main`.
 
-Before a push, fetch and rebase onto `origin/main` . Run the checks on the
-resulting
-tree and review the full outgoing patch. Verify the remote commit after the
-push.
-Package publishing, release tags, and production installation require separate
-approval.
+Before a push, fetch and rebase onto `origin/main`. Run the checks on the
+resulting tree and review the full outgoing patch. Verify the remote commit
+after the push. Package publishing, release tags, and production installation
+require separate approval.
