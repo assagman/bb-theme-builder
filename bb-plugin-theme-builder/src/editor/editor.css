@@ -326,3 +326,29 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+/* Transcript scrolls on its own so a long chat cannot push the message box and Stop button off screen. */
+.tb-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.tb-turn {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 13px;
+}
+.tb-turn[data-role="user"] {
+  background: var(--muted);
+}
+.tb-turn-role {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+/* Agent text is untrusted; pre-wrap keeps user newlines while long unbroken strings cannot widen the panel. */
+.tb-turn-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

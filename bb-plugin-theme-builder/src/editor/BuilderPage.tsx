@@ -5,8 +5,11 @@ import { draftSchema } from "../theme/schema.ts";
 import { swatchOf } from "../theme/swatch.ts";
 import { MODES } from "../theme/tokens.ts";
 import { ActionBar } from "./ActionBar.tsx";
+import { AiTab } from "./AiTab.tsx";
+import { useChat } from "./chat.ts";
 import { COPY } from "./copy.ts";
 import { EditTab } from "./EditTab.tsx";
+import { useModelSelection } from "./model-selection.ts";
 import { Notices } from "./Notices.tsx";
 import { PreviewFrame } from "./PreviewFrame.tsx";
 import { RandomizeTab } from "./RandomizeTab.tsx";
@@ -37,6 +40,11 @@ export function BuilderPage() {
   const [accent, setAccent] = useState("");
   // Whenever the working theme is replaced, its rolls no longer belong to the new one even if a palette happens to match.
   const resetRolls = () => setRollHistory(EMPTY_ROLL_HISTORY);
+  // Chat, model and typed text live here, not in the AI tab, because only the open tab is mounted and the session must keep polling, pinging and applying replies while another tab is open.
+  const chat = useChat();
+  const model = useModelSelection();
+  const [aiDescription, setAiDescription] = useState("");
+  const [aiMessage, setAiMessage] = useState("");
   const { draft, mode, setMode, tab, setTab } = state;
   const valid = draftSchema.safeParse(draft).success;
   const builtInOpen = state.saved === null && !state.dirty;
@@ -60,7 +68,19 @@ export function BuilderPage() {
       : COPY.saved;
   // Render functions, so only the open tab's body is built on each render.
   const tabBodies: Record<Tab, () => ReactNode> = {
-    ai: () => <p className="tb-hint">{COPY.aiPlaceholder}</p>,
+    ai: () => (
+      <AiTab
+        busy={state.busy}
+        accent={accent}
+        onAccent={setAccent}
+        chat={chat}
+        model={model}
+        description={aiDescription}
+        onDescription={setAiDescription}
+        message={aiMessage}
+        onMessage={setAiMessage}
+      />
+    ),
     edit: () => (
       <EditTab
         draft={draft}

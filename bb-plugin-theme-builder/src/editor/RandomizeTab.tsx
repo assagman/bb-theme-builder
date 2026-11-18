@@ -1,9 +1,9 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { Button } from "../../components/ui/button.tsx";
-import { Input } from "../../components/ui/input.tsx";
-import { accentSchema } from "../generation/contract.ts";
 import { randomizePalette } from "../theme/randomize.ts";
 import type { ThemeDraft } from "../theme/tokens.ts";
+import { AccentField } from "./AccentField.tsx";
+import { accentOrNull } from "./accent.ts";
 import { COPY } from "./copy.ts";
 import { LOG_PREFIX } from "./log.ts";
 import {
@@ -14,9 +14,6 @@ import {
   stepHistory,
 } from "./roll-history.ts";
 import type { Tab } from "./store.ts";
-
-/** Shown in the color picker while the accent is blank or invalid; a picker cannot display "no value". */
-const PICKER_FALLBACK = "#7c3aed";
 
 /** One uint32 from the platform CSPRNG, so repeated rolls do not collide the way clock seeds can. */
 function freshSeed(): number {
@@ -49,21 +46,14 @@ export function RandomizeTab({
   onTab: (tab: Tab) => void;
 }) {
   const [failed, setFailed] = useState(false);
-  const errorId = useId();
-  const accentId = useId();
-  const trimmed = accent.trim();
-  const parsed = accentSchema.safeParse(trimmed);
-  const invalid = trimmed !== "" && !parsed.success;
+  const { invalid, value: accentValue } = accentOrNull(accent);
   const live = liveHistory(history, draft);
   const canBack = canStep(live, -1);
   const canForward = canStep(live, 1);
 
   const roll = () => {
     try {
-      const rolled = randomizePalette(
-        trimmed === "" || !parsed.success ? null : parsed.data,
-        freshSeed(),
-      );
+      const rolled = randomizePalette(accentValue, freshSeed());
       onHistory(recordRoll(history, draft, rolled));
       onChange({ ...draft, light: rolled.light, dark: rolled.dark });
       setFailed(false);
@@ -84,31 +74,12 @@ export function RandomizeTab({
   return (
     <div className="space-y-4">
       <p className="tb-hint">{COPY.randomizeIntro}</p>
-      <div className="tb-token tb-token--accent">
-        <label htmlFor={accentId}>{COPY.accentLabel}</label>
-        <input
-          type="color"
-          value={parsed.success ? parsed.data : PICKER_FALLBACK}
-          aria-label={COPY.accentPickerLabel}
-          disabled={busy}
-          onChange={(event) => onAccent(event.target.value)}
-        />
-        <Input
-          id={accentId}
-          value={accent}
-          placeholder={COPY.accentPlaceholder}
-          aria-invalid={invalid}
-          aria-describedby={invalid ? errorId : undefined}
-          spellCheck={false}
-          disabled={busy}
-          onChange={(event) => onAccent(event.target.value)}
-        />
-      </div>
-      {invalid && (
-        <p id={errorId} className="tb-hint tb-field-error">
-          {COPY.accentInvalid}
-        </p>
-      )}
+      <AccentField
+        value={accent}
+        onChange={onAccent}
+        label={COPY.accentLabel}
+        disabled={busy}
+      />
       {failed && (
         <p role="alert" className="tb-hint tb-field-error">
           {COPY.randomizeFailed}

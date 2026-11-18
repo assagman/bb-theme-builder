@@ -1,6 +1,5 @@
 import { type GenerationSelection, selectionSchema } from "./contract.ts";
 
-// Seam for the AI tab model picker (Tasks 7-8); unused by the page until then.
 /** Same key the one-shot generator used, so a remembered model survives the move to chat. */
 export const SELECTION_STORAGE_KEY = "theme-builder.generation-selection.v1";
 
@@ -21,5 +20,14 @@ export function rememberSelection(value: GenerationSelection): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Drops a stored model the host no longer offers or that failed to start, so the next load falls back to the provider default. */
+export function forgetSelection(): void {
+  try {
+    localStorage.removeItem(SELECTION_STORAGE_KEY);
+  } catch {
+    // Nothing stored that could be removed under a storage restriction.
   }
 }

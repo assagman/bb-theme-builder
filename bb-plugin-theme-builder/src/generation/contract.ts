@@ -122,7 +122,7 @@ export const chatMethods = {
     output: z.strictObject({ alive: z.boolean() }),
   },
 };
-// Seam for the AI tab model picker (Tasks 7-8); unused by the page until then.
+/** Provider default the AI tab falls back to when no model was remembered. */
 export const generationMethods = {
   getGenerationSelection: {
     input: z.strictObject({}),

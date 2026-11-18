@@ -1,5 +1,6 @@
 /** `KeyboardEvent.key` values the tabs, menu, and name form react to; shared so the three agree on spelling. */
 export const KEY_ESCAPE = "Escape";
+export const KEY_ENTER = "Enter";
 export const KEY_TAB = "Tab";
 export const KEY_HOME = "Home";
 export const KEY_END = "End";

@@ -14,8 +14,35 @@ export const COPY = {
   unsavedTheme: "Not saved yet",
   tabsLabel: "Ways to make a theme",
   tabLabels: { ai: "AI", edit: "Edit", randomize: "Randomize" },
-  aiPlaceholder:
-    "Describe the theme you want, then keep talking to the agent to tweak it. Coming soon.",
+  aiIntro:
+    "Describe the theme you want, then keep talking to the agent to tweak it.",
+  aiModelLabel: "Model",
+  aiModelUnavailable:
+    "No model is available. Configure a bb provider, then reload this page.",
+  aiModelLoading: "Loading models…",
+  aiDescriptionLabel: "Describe your theme",
+  aiDescriptionPlaceholder:
+    "Warm cream light theme like Cosmic Latte, coffee-brown accent, no stark white",
+  aiDescriptionHelp:
+    "Describe a mood, references, or colors in plain words. Leave blank for a surprise.",
+  aiKeepAccent: "Keep accent",
+  aiGenerate: "Generate",
+  aiLoadingChat: "Loading your conversation…",
+  aiDescriptionInvalid:
+    "That description cannot be used. Shorten it and try again.",
+  aiStarting: "Starting…",
+  aiTranscriptLabel: "Conversation with the agent",
+  aiYou: "You",
+  aiAgent: "Agent",
+  aiUseVersion: "Use this version",
+  aiMessageLabel: "Message to the agent",
+  aiMessagePlaceholder: "Ask for a change, e.g. make dark mode less contrasty",
+  aiSend: "Send",
+  aiStop: "Stop",
+  aiNewChat: "New chat",
+  aiNewChatConfirm:
+    "End this chat and start a new one? The conversation is closed, and the theme you have now stays in the draft.",
+  aiWorking: "The agent is working…",
   randomizeIntro:
     "Pick an accent, or leave it blank, and get a full theme instantly. Roll again until one fits.",
   accentLabel: "Accent",

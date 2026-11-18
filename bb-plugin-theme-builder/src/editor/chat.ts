@@ -45,12 +45,33 @@ export function applyAgentPalette(
   };
 }
 
-/** Newest agent palette among turns not yet shown, so a poll that delivers two replies still lands on the last one. */
+/** Identity of the newest turn already shown; `at` plus role, because the server drops old turns at the cap and an index or count would then drift. */
+export type TurnMark = { at: string; role: ChatTurn["role"] };
+
+/** Index of the first turn after the mark; when the marked turn was dropped, falls back to timestamps (ISO strings order by time). */
+function firstUnseenIndex(turns: ChatTurn[], mark: TurnMark | null): number {
+  if (mark === null) return 0;
+  for (let index = turns.length - 1; index >= 0; index--) {
+    const turn = turns[index];
+    if (turn?.at === mark.at && turn.role === mark.role) return index + 1;
+  }
+  const later = turns.findIndex((turn) => turn.at > mark.at);
+  return later === -1 ? turns.length : later;
+}
+
+/** Mark of the newest turn, or null for an empty history. */
+export function lastMark(turns: ChatTurn[]): TurnMark | null {
+  const turn = turns[turns.length - 1];
+  return turn === undefined ? null : { at: turn.at, role: turn.role };
+}
+
+/** Newest agent palette among turns after the mark, so a poll that delivers two replies still lands on the last one. */
 export function latestUnseenAgentPalette(
   turns: ChatTurn[],
-  seen: number,
+  mark: TurnMark | null,
 ): GeneratedPalette | null {
-  for (let index = turns.length - 1; index >= seen; index--) {
+  const first = firstUnseenIndex(turns, mark);
+  for (let index = turns.length - 1; index >= first; index--) {
     const turn = turns[index];
     if (turn?.role === "agent" && turn.palette !== null) return turn.palette;
   }
@@ -79,22 +100,22 @@ export function isSessionGone(cause: unknown): boolean {
   return describeError(cause).includes(CHAT_ENDED_MESSAGE);
 }
 
+/** Watermark of what the draft already reflects, per session. */
+export type Seen = { sessionId: string; mark: TurnMark | null };
+
 /**
- * Turns an unseen-turn watermark and a new server state into the next
- * watermark. It only grows within a session, so a late response can never
+ * Turns the watermark and a new server state into the next watermark. It
+ * only moves to a newer turn within a session, so a late response can never
  * make an old reply look new again.
  */
-export function nextSeen(
-  previous: { sessionId: string; count: number },
-  next: ChatState,
-): { sessionId: string; count: number } {
-  if (next.kind === "none") return { sessionId: "", count: 0 };
-  const known = previous.sessionId === next.sessionId ? previous.count : 0;
-  return {
-    sessionId: next.sessionId,
-    count: Math.max(known, next.turns.length),
-  };
+export function nextSeen(previous: Seen, next: ChatState): Seen {
+  if (next.kind === "none") return { sessionId: "", mark: null };
+  const known = previous.sessionId === next.sessionId ? previous.mark : null;
+  return { sessionId: next.sessionId, mark: lastMark(next.turns) ?? known };
 }
+
+/** What `useChat` returns; the page holds one and hands it to the AI tab so the session outlives tab switches. */
+export type Chat = ReturnType<typeof useChat>;
 
 /**
  * One agent conversation that refines the draft. The server owns the session,
@@ -105,8 +126,12 @@ export function useChat() {
   const [draft, setDraft] = useEditorField("draft");
   const [state, setState] = useState<ChatState>(NO_CHAT);
   const [error, setError] = useState<string | null>(null);
+  // False until the first chatGet settles, so the page never shows a start form for a chat that exists but has not been fetched yet.
+  const [loaded, setLoaded] = useState(false);
+  // Held here, not in the tab, so remounting the tab mid-start cannot allow a second chatStart.
+  const [starting, setStarting] = useState(false);
   // Turns already reflected in the draft, per session, so a poll never re-applies an old reply over later hand edits.
-  const seen = useRef({ sessionId: "", count: 0 });
+  const seen = useRef<Seen>({ sessionId: "", mark: null });
   // Tickets order calls by when they were issued; an older answer arriving late must not undo a newer one.
   const issued = useRef(0);
   const applied = useRef(0);
@@ -121,10 +146,10 @@ export function useChat() {
       applied.current = ticket;
       if (next.kind === "open") {
         const known =
-          seen.current.sessionId === next.sessionId ? seen.current.count : 0;
+          seen.current.sessionId === next.sessionId ? seen.current.mark : null;
         const palette = latestUnseenAgentPalette(
           next.turns,
-          replay ? known : next.turns.length,
+          replay ? known : lastMark(next.turns),
         );
         if (palette !== null)
           setDraft((value) => applyAgentPalette(value, palette));
@@ -157,13 +182,15 @@ export function useChat() {
       operation: string,
       id: string | null,
       call: () => Promise<ChatState>,
-    ) => {
+    ): Promise<boolean> => {
       const ticket = ++issued.current;
       setError(null);
       try {
         adopt(ticket, await call(), true);
+        return true;
       } catch (cause) {
         fail(ticket, operation, id, cause);
+        return false;
       }
     },
     [adopt, fail],
@@ -175,10 +202,14 @@ export function useChat() {
     const ticket = ++issued.current;
     void rpc.call("chatGet", {}).then(
       (value) => {
-        if (active) adopt(ticket, value, false);
+        if (!active) return;
+        adopt(ticket, value, false);
+        setLoaded(true);
       },
       (cause) => {
-        if (active) fail(ticket, "get", null, cause);
+        if (!active) return;
+        fail(ticket, "get", null, cause);
+        setLoaded(true);
       },
     );
     return () => {
@@ -228,16 +259,22 @@ export function useChat() {
   }, [rpc, fail, sessionId]);
 
   const start = useCallback(
-    (input: ChatStartRequest) =>
-      guarded("start", null, () =>
-        rpc.call("chatStart", {
-          requestId: crypto.randomUUID(),
-          selection: input.selection,
-          accent: input.accent,
-          description: input.description,
-          palette: paletteOf(draftRef.current),
-        }),
-      ),
+    async (input: ChatStartRequest) => {
+      setStarting(true);
+      try {
+        return await guarded("start", null, () =>
+          rpc.call("chatStart", {
+            requestId: crypto.randomUUID(),
+            selection: input.selection,
+            accent: input.accent,
+            description: input.description,
+            palette: paletteOf(draftRef.current),
+          }),
+        );
+      } finally {
+        setStarting(false);
+      }
+    },
     [rpc, guarded],
   );
   const send = useCallback(
@@ -245,7 +282,7 @@ export function useChat() {
       const message = chatMessageSchema.safeParse(text);
       if (!message.success || sessionId === null) {
         setError(sessionId === null ? NO_SESSION_MESSAGE : EMPTY_MESSAGE);
-        return Promise.resolve();
+        return Promise.resolve(false);
       }
       // The current palette always travels so the server can tell whether hand edits need a note to the agent.
       return guarded("send", sessionId, () =>
@@ -260,13 +297,13 @@ export function useChat() {
     [rpc, guarded, sessionId],
   );
   const stop = useCallback(() => {
-    if (sessionId === null) return Promise.resolve();
+    if (sessionId === null) return Promise.resolve(false);
     return guarded("stop", sessionId, () =>
       rpc.call("chatStop", { sessionId }),
     );
   }, [rpc, guarded, sessionId]);
   const end = useCallback(() => {
-    if (sessionId === null) return Promise.resolve();
+    if (sessionId === null) return Promise.resolve(false);
     return guarded("end", sessionId, () => rpc.call("chatEnd", { sessionId }));
   }, [rpc, guarded, sessionId]);
   const checkpoint = useCallback(
@@ -278,5 +315,5 @@ export function useChat() {
     [state, setDraft],
   );
 
-  return { state, error, start, send, stop, end, checkpoint };
+  return { state, error, loaded, starting, start, send, stop, end, checkpoint };
 }
