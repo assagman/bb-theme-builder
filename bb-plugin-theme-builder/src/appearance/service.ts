@@ -16,7 +16,7 @@ import {
   DEFAULT_CODE_THEME,
   DEFAULT_THEME_ID,
   EMPTY_OPERATIONS,
-  ID_KEY_LENGTH,
+  idKey,
   OPERATION_KEY,
   OPERATION_MESSAGES,
   type OperationState,
@@ -24,10 +24,11 @@ import {
   type PaletteIdentity,
   type PendingOperation,
 } from "./operations.ts";
+
+export { appliedPresetId } from "./operations.ts";
+
 import { restoreSourceFingerprint } from "./restore-source.ts";
 
-const ID_SEPARATOR = "-";
-const ID_REPLACEMENT = "";
 const PALETTE_FAVICON = "default";
 type Outcome =
   | { kind: "applied" | "restored"; operationId: string }
@@ -43,9 +44,6 @@ function identity(appearance: Appearance): PaletteIdentity {
 }
 function matches(appearance: Appearance, target: PaletteIdentity) {
   return identity(appearance).fingerprint === target.fingerprint;
-}
-function key(id: string) {
-  return id.replaceAll(ID_SEPARATOR, ID_REPLACEMENT).slice(0, ID_KEY_LENGTH);
 }
 
 export function createAppearanceService(bb: BbPluginApi, store: PresetStore) {
@@ -135,7 +133,7 @@ export function createAppearanceService(bb: BbPluginApi, store: PresetStore) {
             return { kind: "conflict", message: OPERATION_MESSAGES.revision };
           const css = generateCss(toDraft(preset));
           const operationId = randomUUID();
-          const themeId = `theme-builder-${key(preset.id)}-r${preset.revision}-${key(operationId)}`;
+          const themeId = `theme-builder-${idKey(preset.id)}-r${preset.revision}-${idKey(operationId)}`;
           try {
             writeThemeRevision((await adapter.catalog()).dir, themeId, css);
           } catch {

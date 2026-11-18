@@ -13,7 +13,7 @@ import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { createPresetStore } from "../presets/store.ts";
 import { NEUTRAL_PRESET } from "../theme/defaults.ts";
 import type { Appearance } from "./adapter.ts";
-import { createAppearanceService } from "./service.ts";
+import { appliedPresetId, createAppearanceService } from "./service.ts";
 
 const INITIAL: Appearance = {
   themeId: "default",
@@ -121,6 +121,11 @@ test("applies immutable CSS, preserves favicon, restores once, and refuses dupli
     assert.equal(result.kind, "applied");
     assert.equal(f.current().faviconColor, "purple");
     assert.notEqual(f.current().themeId, "default");
+    assert.equal(
+      appliedPresetId(f.current().themeId, [f.preset.id]),
+      f.preset.id,
+    );
+    assert.equal(appliedPresetId("nord", [f.preset.id]), null);
     const css = f.current().customCss;
     await f.store.save({
       id: f.preset.id,

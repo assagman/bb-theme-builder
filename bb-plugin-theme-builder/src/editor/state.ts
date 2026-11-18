@@ -1,143 +1,70 @@
 import { useRpc } from "@get-bb/plugin-sdk/app";
-import {
-  type Dispatch,
-  type SetStateAction,
-  useCallback,
-  useEffect,
-  useSyncExternalStore,
-} from "react";
-import {
-  GENERATION_TIMEOUT_MS,
-  type GenerationSelection,
-  POLL_INTERVAL_MS,
-} from "../generation/contract.ts";
+import { useEffect } from "react";
+import { appliedPresetId } from "../appearance/operations.ts";
 import type { rpcContract } from "../presets/contract.ts";
 import { NEUTRAL_PRESET } from "../theme/defaults.ts";
-import { toDraft } from "../theme/schema.ts";
+import { sameDraft, toDraft } from "../theme/schema.ts";
+import { swatchOf } from "../theme/swatch.ts";
 import {
   MAX_NAME_LENGTH,
-  type Mode,
   type ThemeDraft,
   type ThemePreset,
 } from "../theme/tokens.ts";
 import { COPY } from "./copy.ts";
+import { describeError } from "./describe-error.ts";
+import { useDraftPersistence } from "./draft-persistence.ts";
+import { useEditorField } from "./store.ts";
 
+export { TABS, type Tab } from "./store.ts";
+
+/** Formats the export RPC returns, shared with the menu that asks for them. */
+export type ExportFormat = "json" | "css";
 const DOWNLOAD_CLEANUP_DELAY_MS = 1000;
-const DEFAULT_MODE: Mode = "light";
-const DEFAULT_VIEW = "edit";
-const PRESET_LIMIT_MESSAGE =
-  "Preset limit reached. Delete a saved preset before creating another.";
-const MISSING_MESSAGE =
-  "This preset was deleted in another window. Duplicate your draft to keep it.";
-const GENERATED_MESSAGE =
-  "Both palettes generated. Review the preview and contrast before saving or applying.";
-const CANCELLED_MESSAGE = "Generation cancelled. Your draft is unchanged.";
-const UNDO_MESSAGE = "Previous draft restored.";
-const GENERATION_FAILED_MESSAGE =
-  "Generation could not finish. Your draft is unchanged.";
-type Summary = Pick<ThemePreset, "id" | "name" | "revision">;
-type AppearanceState = {
-  themeId: string;
-  fingerprint: string;
-  restoreAvailable: boolean;
-  operationId: string | null;
-};
-type EditorState = {
-  mode: Mode;
-  view: string;
-  draft: ThemeDraft;
-  saved: ThemePreset | null;
-  undo: ThemeDraft | null;
-  presets: Summary[];
-  busy: boolean;
-  generating: boolean;
-  message: string | null;
-  error: string | null;
-  appearance: AppearanceState | null;
-  missingRestore: boolean;
-};
-let retainedEditor: EditorState = {
-  mode: DEFAULT_MODE,
-  view: DEFAULT_VIEW,
-  draft: structuredClone(NEUTRAL_PRESET),
-  saved: null,
-  undo: null,
-  presets: [],
-  busy: false,
-  generating: false,
-  message: null,
-  error: null,
-  appearance: null,
-  missingRestore: false,
-};
-const editorListeners = new Set<() => void>();
 const pending = { current: false };
-const generationRequest: {
-  current: { id: string; cancelled: boolean } | null;
-} = { current: null };
-function subscribeEditor(listener: () => void) {
-  editorListeners.add(listener);
-  return () => {
-    editorListeners.delete(listener);
-  };
-}
-
-// Transactions outlive compact-shell remounts, so their gate and completion share draft ownership.
-function useEditorField<K extends keyof EditorState>(
-  key: K,
-): [EditorState[K], Dispatch<SetStateAction<EditorState[K]>>] {
-  const value = useSyncExternalStore(
-    subscribeEditor,
-    () => retainedEditor[key],
-  );
-  const setValue = useCallback<Dispatch<SetStateAction<EditorState[K]>>>(
-    (next) => {
-      const value =
-        typeof next === "function" ? next(retainedEditor[key]) : next;
-      retainedEditor = { ...retainedEditor, [key]: value };
-      for (const listener of editorListeners) listener();
-    },
-    [key],
-  );
-  return [value, setValue];
-}
-
+const PRESET_LIMIT_MESSAGE =
+  "Theme limit reached. Delete a saved theme before creating another.";
+const MISSING_MESSAGE =
+  "This theme was deleted in another window. Duplicate your changes to keep them.";
 export function useBuilderState() {
   const rpc = useRpc<typeof rpcContract>();
+  const [tab, setTab] = useEditorField("tab");
   const [mode, setMode] = useEditorField("mode");
-  const [view, setView] = useEditorField("view");
   const [draft, setDraft] = useEditorField("draft");
   const [saved, setSaved] = useEditorField("saved");
   const [presets, setPresets] = useEditorField("presets");
   const [busy, setBusy] = useEditorField("busy");
-  const [generating, setGenerating] = useEditorField("generating");
-  const [undo, setUndo] = useEditorField("undo");
+  const [notice, setNotice] = useEditorField("notice");
   const [message, setMessage] = useEditorField("message");
   const [error, setError] = useEditorField("error");
   const [appearance, setAppearance] = useEditorField("appearance");
   const [missingRestore, setMissingRestore] = useEditorField("missingRestore");
-  const dirty =
-    JSON.stringify(draft) !==
-    JSON.stringify(saved === null ? NEUTRAL_PRESET : toDraft(saved));
-  useEffect(
-    () => () => {
-      const request = generationRequest.current;
-      if (request !== null) {
-        request.cancelled = true;
-        void rpc
-          .call("cancelGeneration", { requestId: request.id })
-          .catch(() => {});
-      }
-    },
-    [rpc],
+  const dirty = !sameDraft(
+    draft,
+    saved === null ? NEUTRAL_PRESET : toDraft(saved),
   );
+  const { clearDraft } = useDraftPersistence({ dirty });
 
   async function refreshList() {
     setPresets(await rpc.call("listPresets", {}));
   }
   async function refreshAppearance() {
     setAppearance(await rpc.call("getAppearance", {}));
-    setMissingRestore(false);
+  }
+  /**
+   * Runs after every apply/restore attempt, even a failed one: a conflict
+   * means the fingerprint is stale, and without a fresh one every retry would
+   * conflict again. A failed refresh is logged, not thrown, so it cannot hide
+   * the outcome of the attempt itself.
+   */
+  async function refreshAfterAttempt(operation: string) {
+    try {
+      await refreshAppearance();
+    } catch (cause) {
+      console.warn("[theme-builder] appearance refresh failed", {
+        operation,
+        cause: describeError(cause),
+      });
+    }
   }
   useEffect(() => {
     let active = true;
@@ -146,7 +73,7 @@ export function useBuilderState() {
         if (active) setPresets(values);
       },
       (cause) => {
-        if (active) setError(String(cause));
+        if (active) setError(describeError(cause));
       },
     );
     void rpc.call("getAppearance", {}).then(
@@ -154,7 +81,7 @@ export function useBuilderState() {
         if (active) setAppearance(value);
       },
       (cause) => {
-        if (active) setError(String(cause));
+        if (active) setError(describeError(cause));
       },
     );
     return () => {
@@ -168,21 +95,23 @@ export function useBuilderState() {
     setBusy(true);
     setError(null);
     setMessage(null);
+    setNotice(null);
     try {
       await action();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(describeError(cause));
     } finally {
       pending.current = false;
       setBusy(false);
     }
   }
 
-  async function saveDraft(): Promise<ThemePreset> {
+  /** `target` lets the page name a brand-new theme in the same step as saving it, before the draft state has caught up. */
+  async function saveDraft(target: ThemeDraft = draft): Promise<ThemePreset> {
     const result = await rpc.call("savePreset", {
       id: saved?.id ?? null,
       expectedRevision: saved?.revision ?? null,
-      draft,
+      draft: target,
     });
     if (result.kind !== "saved")
       throw new Error(
@@ -193,8 +122,9 @@ export function useBuilderState() {
     const { id, name, revision } = result.preset;
     setPresets((values) => [
       ...values.filter((value) => value.id !== id),
-      { id, name, revision },
+      { id, name, revision, swatch: swatchOf(result.preset) },
     ]);
+    clearDraft();
     setMessage(COPY.saveSuccess);
     return result.preset;
   }
@@ -202,7 +132,6 @@ export function useBuilderState() {
   function select(id: string) {
     if (dirty && !window.confirm(COPY.discard)) return;
     void run(async () => {
-      setUndo(null);
       if (id === "") {
         setSaved(null);
         setDraft(structuredClone(NEUTRAL_PRESET));
@@ -216,8 +145,30 @@ export function useBuilderState() {
     });
   }
 
+  /** Throws the unsaved edits away, back to the saved preset or the neutral starter. */
+  function discard() {
+    setDraft(saved === null ? structuredClone(NEUTRAL_PRESET) : toDraft(saved));
+    clearDraft();
+    setError(null);
+    setMessage(null);
+    setNotice(null);
+  }
+
+  function rename(name: string) {
+    setDraft((value) => ({ ...value, name }));
+  }
+
+  /** Starts from the neutral starter as an unsaved theme; asking about unsaved edits is the page's job. */
+  function newTheme() {
+    setSaved(null);
+    setDraft(structuredClone(NEUTRAL_PRESET));
+    clearDraft();
+    setError(null);
+    setMessage(null);
+    setNotice(null);
+  }
+
   function duplicate() {
-    setUndo(null);
     setDraft({
       ...structuredClone(draft),
       name:
@@ -227,17 +178,21 @@ export function useBuilderState() {
     setSaved(null);
     setError(null);
     setMessage(null);
+    setNotice(null);
   }
 
   function remove() {
-    if (saved === null || !window.confirm(COPY.confirmDelete)) return;
+    if (
+      saved === null ||
+      !window.confirm(dirty ? COPY.confirmDeleteDirty : COPY.confirmDelete)
+    )
+      return;
     void run(async () => {
       const result = await rpc.call("deletePreset", {
         id: saved.id,
         expectedRevision: saved.revision,
       });
       if (result.kind === "conflict") throw new Error(COPY.conflict);
-      setUndo(null);
       setSaved(null);
       setDraft(structuredClone(NEUTRAL_PRESET));
       setMessage(COPY.deleted);
@@ -245,7 +200,7 @@ export function useBuilderState() {
     });
   }
 
-  function download(format: "json" | "css") {
+  function download(format: ExportFormat) {
     if (saved === null) return;
     void run(async () => {
       const result = await rpc.call("exportPreset", {
@@ -265,30 +220,46 @@ export function useBuilderState() {
     });
   }
 
+  async function saveAndApply(target: ThemeDraft, observed: string) {
+    const preset = await saveDraft(target);
+    try {
+      const result = await rpc.call("applyPreset", {
+        id: preset.id,
+        revision: preset.revision,
+        observedFingerprint: observed,
+      });
+      if (result.kind !== "applied")
+        throw new Error(
+          "message" in result ? result.message : COPY.unconfirmed,
+        );
+      setMessage(COPY.applySuccess);
+      setMissingRestore(false);
+    } catch (cause) {
+      setMessage(null);
+      throw new Error(COPY.savedApplyFailed + describeError(cause));
+    } finally {
+      await refreshAfterAttempt("apply");
+    }
+  }
+
   function apply() {
     if (appearance === null) return;
-    void run(async () => {
-      const preset = await saveDraft();
-      try {
-        const result = await rpc.call("applyPreset", {
-          id: preset.id,
-          revision: preset.revision,
-          observedFingerprint: appearance.fingerprint,
-        });
-        if (result.kind !== "applied")
-          throw new Error(
-            "message" in result ? result.message : COPY.unconfirmed,
-          );
-        setMessage(COPY.applySuccess);
-      } catch (cause) {
-        setMessage(null);
-        throw new Error(
-          COPY.savedApplyFailed +
-            (cause instanceof Error ? cause.message : String(cause)),
-        );
-      }
-      await refreshAppearance();
-    });
+    const observed = appearance.fingerprint;
+    void run(() => saveAndApply(draft, observed));
+  }
+
+  /** Names a not-yet-saved theme and saves it (and applies it when asked) in one step, so the page needs no separate rename-then-save. */
+  function saveAs(name: string, options: { apply: boolean }) {
+    const target = { ...draft, name };
+    if (!options.apply) {
+      void run(async () => {
+        await saveDraft(target);
+      });
+      return;
+    }
+    if (appearance === null) return;
+    const observed = appearance.fingerprint;
+    void run(() => saveAndApply(target, observed));
   }
 
   function restore(fallbackToDefault = false) {
@@ -299,91 +270,39 @@ export function useBuilderState() {
       return;
     const operationId = appearance.operationId;
     void run(async () => {
-      const result = await rpc.call("restoreAppearance", {
-        operationId,
-        observedFingerprint: appearance.fingerprint,
-        fallbackToDefault,
-      });
-      setMissingRestore(result.kind === "missing");
-      if (result.kind !== "restored")
-        throw new Error(
-          "message" in result ? result.message : COPY.unconfirmed,
-        );
-      setMessage(fallbackToDefault ? COPY.defaultSuccess : COPY.restoreSuccess);
-      await refreshAppearance();
-    });
-  }
-
-  function randomize(
-    selection: GenerationSelection,
-    accent: string | null,
-    description: string | null,
-  ) {
-    void run(async () => {
-      const before = structuredClone(draft);
-      const request = { id: crypto.randomUUID(), cancelled: false };
-      generationRequest.current = request;
-      setGenerating(true);
       try {
-        let result = await rpc.call("startGeneration", {
-          requestId: request.id,
-          selection,
-          accent,
-          description,
+        const result = await rpc.call("restoreAppearance", {
+          operationId,
+          observedFingerprint: appearance.fingerprint,
+          fallbackToDefault,
         });
-        const deadline = Date.now() + GENERATION_TIMEOUT_MS;
-        while (result.kind === "running" && !request.cancelled) {
-          if (Date.now() > deadline) throw new Error(GENERATION_FAILED_MESSAGE);
-          await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-          result = await rpc.call("getGeneration", { requestId: request.id });
-        }
-        if (request.cancelled || result.kind === "cancelled") {
-          await rpc.call("cancelGeneration", { requestId: request.id });
-          setMessage(CANCELLED_MESSAGE);
-        } else if (result.kind === "ready") {
-          setUndo(before);
-          setDraft({ ...before, ...result.palette });
-          setMessage(GENERATED_MESSAGE);
-        } else
+        setMissingRestore(result.kind === "missing");
+        if (result.kind !== "restored")
           throw new Error(
-            result.kind === "failed"
-              ? result.message
-              : GENERATION_FAILED_MESSAGE,
+            "message" in result ? result.message : COPY.unconfirmed,
           );
-      } catch (cause) {
-        await rpc
-          .call("cancelGeneration", { requestId: request.id })
-          .catch(() => {});
-        throw cause;
+        setMessage(
+          fallbackToDefault ? COPY.defaultSuccess : COPY.restoreSuccess,
+        );
       } finally {
-        generationRequest.current = null;
-        setGenerating(false);
+        await refreshAfterAttempt("restore");
       }
     });
   }
 
-  function cancelGeneration() {
-    const request = generationRequest.current;
-    if (request === null) return;
-    request.cancelled = true;
-    void rpc
-      .call("cancelGeneration", { requestId: request.id })
-      .catch(() => {});
-  }
-
-  function undoRandomization() {
-    if (pending.current || undo === null) return;
-    setDraft(structuredClone(undo));
-    setUndo(null);
-    setError(null);
-    setMessage(UNDO_MESSAGE);
-  }
-
   return {
+    tab,
+    setTab,
+    notice,
+    discard,
+    rename,
+    newTheme,
+    appliedPresetId: appliedPresetId(
+      appearance?.themeId ?? "",
+      presets.map((preset) => preset.id),
+    ),
     mode,
     setMode,
-    view,
-    setView,
     draft,
     setDraft,
     saved,
@@ -396,18 +315,11 @@ export function useBuilderState() {
     duplicate,
     remove,
     download,
-    generating,
-    randomize,
-    cancelGeneration,
-    undoRandomization,
-    canUndo: undo !== null,
     appearance,
     missingRestore,
     apply,
     restore,
-    refreshAppearance: () => {
-      void run(refreshAppearance);
-    },
+    saveAs,
     save: () => {
       void run(async () => {
         await saveDraft();

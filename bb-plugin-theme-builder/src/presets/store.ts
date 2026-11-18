@@ -8,6 +8,7 @@ import {
   revisionSchema,
   toDraft,
 } from "../theme/schema.ts";
+import { swatchOf } from "../theme/swatch.ts";
 import {
   INITIAL_REVISION,
   MAX_PRESETS,
@@ -54,7 +55,12 @@ export function createPresetStore(kv: PluginKvStorage) {
       );
       return presets
         .filter((preset): preset is ThemePreset => preset !== null)
-        .map(({ id, name, revision }) => ({ id, name, revision }));
+        .map((preset) => ({
+          id: preset.id,
+          name: preset.name,
+          revision: preset.revision,
+          swatch: swatchOf(preset),
+        }));
     },
     save(input: SaveInput): Promise<SaveResult> {
       return serial.run(async () => {

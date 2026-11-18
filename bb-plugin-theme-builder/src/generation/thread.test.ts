@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   createFakePluginHost,
   makeThreadResponse,
 } from "@get-bb/plugin-sdk/testing";
-import { defaultSelection, runGenerationThread } from "./thread.ts";
+import { defaultSelection, spawnChatThread } from "./thread.ts";
 
 const PROVIDER = "fixture";
 const MODEL = "fixture-model";
@@ -18,6 +18,10 @@ const PERSONAL_PROJECT = {
   updatedAt: 0,
   gitRemoteUrl: null,
 };
+// Late-spawn cleanup is fire-and-forget, so tests yield before asserting on it.
+const SETTLE_MS = 50;
+const settle = () => delay(SETTLE_MS);
+const PROMPT = "prompt";
 const SELECTION = {
   providerId: PROVIDER,
   model: MODEL,
@@ -63,31 +67,23 @@ const CATALOG = {
   ],
 };
 
-test("uses the selected model in a personal thread, then reads output and archives it", async () => {
+test("spawns the chat thread with the selected model in a personal text-only thread", async () => {
   const thread = makeThreadResponse({ status: "idle" });
   const { bb, harness } = createFakePluginHost({
     sdk: {
       providers: { models: async () => CATALOG },
       projects: { list: async () => [PERSONAL_PROJECT] },
-      threads: {
-        spawn: async () => thread,
-        get: async () => thread,
-        output: async () => ({ output: "palette" }),
-        archive: async () => ({ archived: 1 }),
-      },
+      threads: { spawn: async () => thread },
     },
   });
   try {
-    const input = {
-      requestId: randomUUID(),
-      selection: SELECTION,
-      accent: null,
-      description: null,
-    };
-    assert.equal(
-      await runGenerationThread(bb, input, new AbortController().signal),
-      "palette",
+    const id = await spawnChatThread(
+      bb,
+      { selection: SELECTION },
+      PROMPT,
+      new AbortController().signal,
     );
+    assert.equal(id, thread.id);
     const [[spawn]] = harness.inspection.sdk.callsTo("threads.spawn");
     assert.ok(
       typeof spawn === "object" &&
@@ -102,7 +98,6 @@ test("uses the selected model in a personal thread, then reads output and archiv
       type: "host",
       workspace: { type: "personal" },
     });
-    assert.equal(harness.inspection.sdk.callsTo("threads.archive").length, 1);
     assert.equal(harness.inspection.sdk.callsTo("theme.set").length, 0);
   } finally {
     await harness.lifecycle.dispose();
@@ -115,14 +110,10 @@ test("rejects forged model choices before spawning a thread", async () => {
   });
   try {
     await assert.rejects(
-      runGenerationThread(
+      spawnChatThread(
         bb,
-        {
-          requestId: randomUUID(),
-          selection: { ...SELECTION, model: "unknown" },
-          accent: null,
-          description: null,
-        },
+        { selection: { ...SELECTION, model: "unknown" } },
+        PROMPT,
         new AbortController().signal,
       ),
     );
@@ -151,17 +142,9 @@ test("cancellation during spawn stops and archives the late-created thread", asy
   });
   try {
     await assert.rejects(
-      runGenerationThread(
-        bb,
-        {
-          requestId: randomUUID(),
-          selection: SELECTION,
-          accent: null,
-          description: null,
-        },
-        controller.signal,
-      ),
+      spawnChatThread(bb, { selection: SELECTION }, PROMPT, controller.signal),
     );
+    await settle();
     assert.equal(harness.inspection.sdk.callsTo("threads.stop").length, 1);
     assert.equal(harness.inspection.sdk.callsTo("threads.archive").length, 1);
   } finally {
@@ -195,7 +178,7 @@ test("model discovery falls through empty and failed providers to a usable selec
   }
 });
 
-test("a failed stop does not skip archiving the generation thread", async () => {
+test("a failed stop does not skip archiving the chat thread", async () => {
   const controller = new AbortController();
   const thread = makeThreadResponse({ status: "active" });
   const { bb, harness } = createFakePluginHost({
@@ -216,17 +199,9 @@ test("a failed stop does not skip archiving the generation thread", async () => 
   });
   try {
     await assert.rejects(
-      runGenerationThread(
-        bb,
-        {
-          requestId: randomUUID(),
-          selection: SELECTION,
-          accent: null,
-          description: null,
-        },
-        controller.signal,
-      ),
+      spawnChatThread(bb, { selection: SELECTION }, PROMPT, controller.signal),
     );
+    await settle();
     assert.equal(harness.inspection.sdk.callsTo("threads.archive").length, 1);
   } finally {
     await harness.lifecycle.dispose();

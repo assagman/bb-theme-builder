@@ -8,9 +8,8 @@ import {
 
 const JSON_FENCE = /^```(?:json)?\s*\n([\s\S]*?)\n```$/;
 const HEX_VALUE = /^#[0-9a-fA-F]{6}$/;
-const INVALID_RESULT =
-  "The model returned an invalid palette. Try Randomize again.";
-// Shared by one-shot generation and chat so both paths hold the agent to the same palette rules.
+const INVALID_RESULT = "The model returned an invalid palette.";
+// Kept apart from the chat instructions so every chat prompt holds the agent to the same palette rules.
 const PALETTE_RULES = [
   "This is a text-only design request. Do not use tools, read files, run commands, change settings, or ask questions.",
   "Every color must be an opaque six-digit hex string. Include every token listed below, with no additional keys.",
@@ -19,11 +18,6 @@ const PALETTE_RULES = [
   "Keep warning, success, destructive, and diff colors recognizable while coordinating their tones with the palette.",
   "diffAdded and diffRemoved are TEXT colors on canvas, not background fills. Keep these and all semantic text colors readable on canvas in each mode.",
 ];
-const INSTRUCTIONS = [
-  "Create a distinctive, coordinated light and dark UI color palette. Return only JSON with light and dark objects.",
-  ...PALETTE_RULES,
-  "Vary the visual direction for each variation seed. Never output CSS, HTML, names, fonts, or commentary.",
-].join("\n");
 // The reply must echo the request ID, because a poll right after a send can still read the previous turn's reply.
 const REPLY_CONTRACT =
   "Reply with JSON {requestId, summary, light, dark}. summary: one plain sentence on what you changed. requestId: copy the Request ID of the latest message exactly.";
@@ -108,14 +102,6 @@ function paletteSection(note: string, palette: GeneratedPalette | null) {
   return palette === null ? "" : `\n${note}\n${JSON.stringify(palette)}`;
 }
 
-export function generationPrompt(
-  accent: string | null,
-  seed: string,
-  description: string | null = null,
-): string {
-  return `${INSTRUCTIONS}\n${accentConstraint(accent)}${briefSection(description)}\nVariation seed: ${seed}\nTokens in each mode:\n${TOKEN_LABELS}`;
-}
-
 /** First chat message; `palette` is the Randomize result the user wants refined, or null to start fresh. */
 export function chatOpeningPrompt(
   accent: string | null,
@@ -182,12 +168,4 @@ export function parseChatReply(
   if (!parsed.success) throw new InvalidReplyError({ cause: parsed.error });
   const { summary, light, dark } = parsed.data;
   return { summary, palette: pinAccent({ light, dark }, accent) };
-}
-
-export function parseGeneratedPalette(text: string, accent: string | null) {
-  try {
-    return pinAccent(generatedPaletteSchema.parse(decodeReply(text)), accent);
-  } catch {
-    throw new Error(INVALID_RESULT);
-  }
 }

@@ -86,8 +86,10 @@ export const chatStateSchema = z.discriminatedUnion("kind", [
     error: z.string().nullable(),
   }),
 ]);
+/** Shown and matched by the page: an ended or unknown session is the one chat failure that must close the chat view. */
+export const CHAT_ENDED_MESSAGE = "This chat has ended. Start a new chat.";
 const sessionIdInput = z.strictObject({ sessionId: idSchema });
-/** Chat RPC surface; it sits beside the one-shot methods until the client stops using them. */
+/** Chat RPC surface: the only way the page talks to an agent. */
 export const chatMethods = {
   chatStart: {
     input: z.strictObject({
@@ -114,41 +116,20 @@ export const chatMethods = {
     input: sessionIdInput,
     output: z.strictObject({ kind: z.literal("none") }),
   },
-  chatPing: { input: sessionIdInput, output: z.strictObject({}) },
+  // `alive` is false when the id is not the open session, so the page can close a chat the sweeper ended.
+  chatPing: {
+    input: sessionIdInput,
+    output: z.strictObject({ alive: z.boolean() }),
+  },
 };
-export const generationInputSchema = z.strictObject({
-  requestId: idSchema,
-  selection: selectionSchema,
-  accent: accentSchema.nullable(),
-  description: descriptionSchema.nullable().default(null),
-});
-export const generationResultSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("running") }),
-  z.strictObject({ kind: z.literal("ready"), palette: generatedPaletteSchema }),
-  z.strictObject({ kind: z.literal("cancelled") }),
-  z.strictObject({ kind: z.literal("failed"), message: z.string() }),
-]);
+// Seam for the AI tab model picker (Tasks 7-8); unused by the page until then.
 export const generationMethods = {
   getGenerationSelection: {
     input: z.strictObject({}),
     output: selectionSchema.nullable(),
   },
-  startGeneration: {
-    input: generationInputSchema,
-    output: generationResultSchema,
-  },
-  getGeneration: {
-    input: z.strictObject({ requestId: idSchema }),
-    output: generationResultSchema,
-  },
-  cancelGeneration: {
-    input: z.strictObject({ requestId: idSchema }),
-    output: z.strictObject({}),
-  },
 };
 export type GenerationSelection = z.infer<typeof selectionSchema>;
-export type GenerationInput = z.infer<typeof generationInputSchema>;
-export type GenerationResult = z.infer<typeof generationResultSchema>;
 export type GeneratedPalette = z.infer<typeof generatedPaletteSchema>;
 /** One chat line as stored and rendered. */
 export type ChatTurn = z.infer<typeof chatTurnSchema>;

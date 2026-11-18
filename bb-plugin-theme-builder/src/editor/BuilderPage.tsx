@@ -1,87 +1,139 @@
+import { type ReactNode, useState } from "react";
 import { Button } from "../../components/ui/button.tsx";
-import { Input } from "../../components/ui/input.tsx";
-import { contrastReport } from "../theme/contrast.ts";
+import { NEUTRAL_PRESET } from "../theme/defaults.ts";
 import { draftSchema } from "../theme/schema.ts";
-import { MAX_NAME_LENGTH, MODES } from "../theme/tokens.ts";
-import { COPY, RATIO_DECIMALS, SELECT_CLASS } from "./copy.ts";
+import { swatchOf } from "../theme/swatch.ts";
+import { MODES } from "../theme/tokens.ts";
+import { ActionBar } from "./ActionBar.tsx";
+import { COPY } from "./copy.ts";
+import { EditTab } from "./EditTab.tsx";
+import { Notices } from "./Notices.tsx";
 import { PreviewFrame } from "./PreviewFrame.tsx";
-import { RandomizeControls } from "./RandomizeControls.tsx";
 import { useBuilderState } from "./state.ts";
-import { TokenControls } from "./TokenControls.tsx";
+import type { Tab } from "./store.ts";
+import { TabPanel, Tabs } from "./Tabs.tsx";
+import { type ThemeEntry, ThemeList } from "./ThemeList.tsx";
 import "./editor.css";
 
-const NAME_INPUT_ID = "theme-builder-name";
+const NEUTRAL_SWATCH = swatchOf(NEUTRAL_PRESET);
+/** Never a real theme id (those are UUIDs), so the unsaved card cannot collide with a saved one. */
+const UNSAVED_ENTRY_ID = "unsaved";
 
+/**
+ * Theme Builder page: theme list on top, the three ways to make a theme
+ * beside the live preview, and one action bar. All of it edits the single
+ * working draft held by `useBuilderState`, called once here so its mount
+ * effects (list, appearance, draft restore) run once.
+ */
 export function BuilderPage() {
   const state = useBuilderState();
-  const { draft, setDraft, mode, setMode, view, setView } = state;
+  // Bumped when the working theme is replaced by one with the same bar key, so a half-filled name form cannot outlive it.
+  const [barEpoch, setBarEpoch] = useState(0);
+  const { draft, mode, setMode, tab, setTab } = state;
   const valid = draftSchema.safeParse(draft).success;
-  const report = valid ? contrastReport(draft) : [];
-  const savedActionDisabled = state.busy || state.saved === null;
-  const saveDisabled =
-    state.busy || !valid || (!state.dirty && state.saved !== null);
-  const applyDisabled = state.busy || !valid || state.appearance === null;
-  const restoreDisabled = state.busy || !state.appearance?.restoreAvailable;
-  const draftStatus = state.dirty
+  const builtInOpen = state.saved === null && !state.dirty;
+  // The state layer never prompts, so every path that would drop edits asks here.
+  const confirmDiscard = () => !state.dirty || window.confirm(COPY.discard);
+  const discard = () => {
+    if (confirmDiscard()) state.discard();
+  };
+  const createTheme = () => {
+    if (!confirmDiscard()) return;
+    setBarEpoch((value) => value + 1);
+    state.newTheme();
+  };
+  const status = state.dirty
     ? COPY.dirty
     : state.saved === null
-      ? COPY.neutral
+      ? COPY.statusBuiltIn
       : COPY.saved;
+  // Render functions, so only the open tab's body is built on each render.
+  const tabBodies: Record<Tab, () => ReactNode> = {
+    ai: () => <p className="tb-hint">{COPY.aiPlaceholder}</p>,
+    edit: () => (
+      <EditTab
+        draft={draft}
+        mode={mode}
+        valid={valid}
+        busy={state.busy}
+        onChange={state.setDraft}
+      />
+    ),
+    randomize: () => <p className="tb-hint">{COPY.randomizePlaceholder}</p>,
+  };
+  const entries: ThemeEntry[] = [
+    {
+      id: "",
+      name: COPY.neutralBuiltIn,
+      swatch: NEUTRAL_SWATCH,
+      open: builtInOpen,
+      active: false,
+    },
+    // Right after Neutral, where the first edit of it happens, so the list does not jump.
+    ...(state.saved === null && state.dirty
+      ? [
+          {
+            id: UNSAVED_ENTRY_ID,
+            name: draft.name,
+            swatch: swatchOf(draft),
+            open: true,
+            active: false,
+            unsaved: true,
+          },
+        ]
+      : []),
+    ...state.presets.map((theme) => ({
+      id: theme.id,
+      name: theme.name,
+      swatch: theme.swatch,
+      open: theme.id === state.saved?.id,
+      active: theme.id === state.appliedPresetId,
+    })),
+  ];
   return (
     <div className="tb-shell">
-      <div className="tb-body" data-view={view}>
-        <p className="mb-5 text-sm text-muted-foreground">
-          {COPY.introduction}
-        </p>
-        <div className="tb-view-tabs">
-          {[COPY.edit, COPY.preview].map((label) => (
+      <div className="tb-body">
+        <header className="tb-header">
+          <h1 className="tb-title">{COPY.title}</h1>
+        </header>
+        <section className="tb-themes" aria-label={COPY.yourThemes}>
+          <div className="tb-section-head">
+            <h2 className="tb-heading">{COPY.yourThemes}</h2>
             <Button
-              key={label}
+              type="button"
               variant="outline"
-              aria-pressed={view === label.toLowerCase()}
-              onClick={() => setView(label.toLowerCase())}
+              size="sm"
+              disabled={state.busy}
+              aria-label={COPY.newThemeLabel}
+              onClick={createTheme}
             >
-              {label}
+              <span aria-hidden="true">+ </span>
+              {COPY.newTheme}
             </Button>
-          ))}
-        </div>
-        <div className="tb-grid">
-          <div className="tb-edit-column space-y-5">
-            <label className="block space-y-2">
-              <span className="text-sm font-medium">{COPY.presets}</span>
-              <select
-                className={SELECT_CLASS}
-                value={state.saved?.id ?? ""}
-                disabled={state.busy}
-                onChange={(event) => state.select(event.target.value)}
-              >
-                <option value="">{COPY.neutral}</option>
-                {state.presets.map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <fieldset disabled={state.busy} className="space-y-5">
-              <label className="block space-y-2" htmlFor={NAME_INPUT_ID}>
-                <span className="text-sm font-medium">{COPY.name}</span>
-                <Input
-                  id={NAME_INPUT_ID}
-                  value={draft.name}
-                  maxLength={MAX_NAME_LENGTH}
-                  onChange={(event) =>
-                    setDraft({ ...draft, name: event.target.value })
-                  }
-                />
-              </label>
-              <p role="status" className="text-xs text-muted-foreground">
-                {draftStatus}
-              </p>
-              <fieldset className="flex gap-2" aria-label={COPY.mode}>
+          </div>
+          <ThemeList
+            entries={entries}
+            disabled={state.busy}
+            onSelect={(id) => {
+              setBarEpoch((value) => value + 1);
+              state.select(id);
+            }}
+          />
+        </section>
+        <div className="tb-workspace">
+          <section className="tb-editor" aria-label={COPY.tabsLabel}>
+            <Tabs value={tab} onChange={setTab} />
+            <TabPanel tab={tab}>{tabBodies[tab]()}</TabPanel>
+          </section>
+          <section className="tb-preview" aria-label={COPY.preview}>
+            <div className="tb-section-head">
+              <h2 className="tb-heading">{COPY.preview}</h2>
+              <fieldset className="tb-mode" aria-label={COPY.mode}>
                 {MODES.map((value) => (
                   <Button
                     key={value}
+                    type="button"
+                    size="sm"
                     variant={value === mode ? "default" : "outline"}
                     aria-pressed={value === mode}
                     onClick={() => setMode(value)}
@@ -90,143 +142,47 @@ export function BuilderPage() {
                   </Button>
                 ))}
               </fieldset>
-              <TokenControls draft={draft} mode={mode} onChange={setDraft} />
-            </fieldset>
-            <RandomizeControls
-              busy={state.busy}
-              generating={state.generating}
-              canUndo={state.canUndo}
-              onGenerate={state.randomize}
-              onCancel={state.cancelGeneration}
-              onUndo={state.undoRandomization}
-            />
-            {!valid && <p role="alert">{COPY.invalid}</p>}
-            <div className="tb-toolbar">
-              <Button disabled={saveDisabled} onClick={state.save}>
-                {COPY.save}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={state.busy}
-                onClick={state.duplicate}
-              >
-                {COPY.duplicate}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={savedActionDisabled}
-                onClick={state.remove}
-              >
-                {COPY.remove}
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={savedActionDisabled}
-                onClick={() => state.select(state.saved?.id ?? "")}
-              >
-                {COPY.reloadSaved}
-              </Button>
-            </div>
-            <div className="tb-toolbar">
-              <Button
-                variant="outline"
-                disabled={savedActionDisabled}
-                onClick={() => state.download("json")}
-              >
-                {COPY.exportJson}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={savedActionDisabled}
-                onClick={() => state.download("css")}
-              >
-                {COPY.exportCss}
-              </Button>
-            </div>
-            <div className="space-y-3">
-              <p className="text-xs text-muted-foreground">{COPY.global}</p>
-              <div className="tb-toolbar">
-                <Button disabled={applyDisabled} onClick={state.apply}>
-                  {COPY.apply}
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={restoreDisabled}
-                  onClick={() => state.restore()}
-                >
-                  {COPY.restore}
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={state.busy}
-                  onClick={state.refreshAppearance}
-                >
-                  {COPY.refresh}
-                </Button>
-              </div>
-              {state.missingRestore && (
-                <Button
-                  variant="outline"
-                  disabled={state.busy}
-                  onClick={() => state.restore(true)}
-                >
-                  {COPY.defaultAction}
-                </Button>
-              )}
-              {state.appearance && (
-                <p className="break-all text-xs text-muted-foreground">
-                  {COPY.active}
-                  {state.appearance.themeId}
-                </p>
-              )}
-            </div>
-            {state.busy && <p role="status">{COPY.busy}</p>}
-            {state.message !== null && <p role="status">{state.message}</p>}
-            {state.error !== null && <p role="alert">{state.error}</p>}
-            <p className="text-xs text-muted-foreground">{COPY.localNote}</p>
-            <details>
-              <summary className="cursor-pointer font-medium">
-                {COPY.contrast}
-              </summary>
-              <p className="my-3 text-xs text-muted-foreground">
-                {COPY.contrastNote}
-              </p>
-              {MODES.map((value) => (
-                <section key={value} className="mb-4">
-                  <h3 className="mb-2 text-sm font-medium">{COPY[value]}</h3>
-                  <dl className="tb-contrast">
-                    {report
-                      .filter((pair) => pair.mode === value)
-                      .map((pair) => (
-                        <div key={pair.label} className="contents">
-                          <dt>{pair.label}</dt>
-                          <dd>
-                            {pair.ratio.toFixed(RATIO_DECIMALS)}:1 ·{" "}
-                            {pair.passes
-                              ? COPY.contrastPass
-                              : COPY.contrastFail}
-                          </dd>
-                        </div>
-                      ))}
-                  </dl>
-                </section>
-              ))}
-            </details>
-          </div>
-          <section
-            className="tb-preview-column space-y-3"
-            aria-label={COPY.preview}
-          >
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium">{COPY.preview}</h2>
-              <span className="text-xs text-muted-foreground">
-                {COPY[mode]}
-              </span>
             </div>
             <PreviewFrame draft={draft} mode={mode} />
-            <p className="text-xs text-muted-foreground">{COPY.previewNote}</p>
+            <p className="tb-hint">{COPY.previewNote}</p>
           </section>
         </div>
+        <ActionBar
+          key={`${state.saved?.id ?? UNSAVED_ENTRY_ID}-${barEpoch}`}
+          name={draft.name}
+          status={status}
+          dirty={state.dirty}
+          busy={state.busy}
+          valid={valid}
+          hasSaved={state.saved !== null}
+          appearance={{
+            current: state.appearance,
+            missingRestore: state.missingRestore,
+          }}
+          onDiscard={discard}
+          onSave={state.save}
+          onApply={state.apply}
+          onSaveAs={state.saveAs}
+          onRename={state.rename}
+          onDuplicate={() => {
+            setBarEpoch((value) => value + 1);
+            state.duplicate();
+          }}
+          onDelete={state.remove}
+          onExport={state.download}
+          onRestore={() => state.restore()}
+          onUseDefault={() => state.restore(true)}
+          notices={
+            <Notices
+              busy={state.busy}
+              notice={state.notice}
+              message={state.message}
+              error={state.error}
+              invalid={!valid}
+              onDiscardRestored={discard}
+            />
+          }
+        />
       </div>
     </div>
   );

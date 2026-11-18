@@ -57,3 +57,25 @@ export function toDraft(preset: ThemePreset): ThemeDraft {
     codeFont: preset.codeFont,
   };
 }
+
+/** The two palettes of a theme, the part an agent reply or checkpoint replaces; fonts and name stay with the draft. */
+export function paletteOf(draft: Pick<ThemeDraft, "light" | "dark">) {
+  return { light: draft.light, dark: draft.dark };
+}
+
+// Fixed field and token order, because drafts reach the page from sources (defaults, zod, stored JSON) that order keys differently.
+function canonical(draft: ThemeDraft) {
+  return JSON.stringify([
+    draft.schemaVersion,
+    draft.name,
+    draft.uiFont,
+    draft.codeFont,
+    TOKEN_KEYS.map((key) => draft.light[key]),
+    TOKEN_KEYS.map((key) => draft.dark[key]),
+  ]);
+}
+
+/** One definition of "unchanged" for dirty checks and draft restore; compares values, never key order. */
+export function sameDraft(a: ThemeDraft, b: ThemeDraft): boolean {
+  return canonical(a) === canonical(b);
+}

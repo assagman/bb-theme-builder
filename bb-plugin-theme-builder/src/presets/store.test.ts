@@ -5,6 +5,7 @@ import plugin from "../../server.ts";
 import { generateCss } from "../theme/css.ts";
 import { NEUTRAL_PRESET } from "../theme/defaults.ts";
 import { toDraft } from "../theme/schema.ts";
+import { swatchOf } from "../theme/swatch.ts";
 import { createPresetStore } from "./store.ts";
 
 const FIRST_NAME = "First window";
@@ -83,6 +84,14 @@ test("exports saved values without timestamps or paths, and requires the current
     assert.deepEqual(JSON.parse(exported.json), toDraft(saved.preset));
     assert.equal(exported.css, generateCss(toDraft(saved.preset)));
     assert.match(exported.baseName, /^[a-z0-9-]+$/);
+    assert.deepEqual(await store.list(), [
+      {
+        id: saved.preset.id,
+        name: saved.preset.name,
+        revision: saved.preset.revision,
+        swatch: swatchOf(NEUTRAL_PRESET),
+      },
+    ]);
     assert.equal(
       (await store.export({ id: saved.preset.id, revision: 2 })).kind,
       "conflict",

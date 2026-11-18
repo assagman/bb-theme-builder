@@ -1,5 +1,5 @@
 /**
- * Bounded waits shared by generation jobs, agent threads, and chat sessions. The SDK and storage cannot
+ * Bounded waits shared by agent threads and chat sessions. The SDK and storage cannot
  * abort every transport, so each wait that could hang loses a race against a timer or an abort signal.
  */
 

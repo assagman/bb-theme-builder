@@ -4,7 +4,7 @@ import type { BbPluginApi } from "@get-bb/plugin-sdk";
 const HASH_ALGORITHM = "sha256";
 const HASH_ENCODING = "hex";
 const SELECTION_ERROR =
-  "The theme selection could not be confirmed. Refresh appearance before retrying.";
+  "The theme selection could not be confirmed. Try again.";
 
 export type ThemeApi = BbPluginApi["sdk"]["theme"];
 export type Appearance = Awaited<ReturnType<ThemeApi["get"]>>;

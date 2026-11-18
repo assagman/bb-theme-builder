@@ -2,19 +2,16 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import {
   type ChatStartInput,
-  type GenerationInput,
   type GenerationSelection,
   POLL_INTERVAL_MS,
 } from "./contract.ts";
 import {
-  generationPrompt,
   type ParsedReply,
   parseChatReply,
   StaleReplyError,
 } from "./palette.ts";
 import { raceSignal, withTimeout } from "./timeouts.ts";
 
-const THREAD_TITLE = "Theme Builder palette generation";
 const CHAT_THREAD_TITLE = "Theme Builder chat";
 // A poll right after a send can still read the previous idle state and reply; only after this grace (or after seeing the thread busy) is an off-contract reply treated as this turn's answer.
 const STALE_IDLE_GRACE_MS = 5_000;
@@ -214,36 +211,6 @@ async function spawnTextThread(
     title,
     prompt,
   });
-}
-
-/** Runs one-shot generation in a throwaway thread and returns its raw output; the thread is always cleaned up. */
-export async function runGenerationThread(
-  bb: BbPluginApi,
-  input: GenerationInput,
-  signal: AbortSignal,
-): Promise<string> {
-  // Captured cleanup methods remain usable after BB invalidates fresh SDK access during disposal.
-  const threads = bb.sdk.threads;
-  const thread = await spawnTextThread(
-    bb,
-    threads,
-    input.selection,
-    THREAD_TITLE,
-    generationPrompt(input.accent, input.requestId, input.description),
-    signal,
-  );
-  let complete = false;
-  try {
-    const output = await pollUntilIdle(threads, thread.id, signal, (text) => {
-      if (text === null) throw new Error(ERROR);
-      return text;
-    });
-    complete = true;
-    return output;
-  } finally {
-    // Cancellation may arrive during spawn; compensate after its thread ID becomes available.
-    await cleanupThread(bb, threads, thread.id, complete);
-  }
 }
 
 /**

@@ -2,6 +2,7 @@ import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { chatMethods, generationMethods } from "../generation/contract.ts";
 import {
+  colorSchema,
   draftSchema,
   idSchema,
   presetSchema,
@@ -10,6 +11,16 @@ import {
 import { MAX_PRESETS } from "../theme/tokens.ts";
 
 const FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/;
+const swatchColors = z.tuple([
+  colorSchema,
+  colorSchema,
+  colorSchema,
+  colorSchema,
+]);
+const swatchSchema = z.strictObject({
+  light: swatchColors,
+  dark: swatchColors,
+});
 const conflictSchema = z.strictObject({ kind: z.literal("conflict") });
 const referenceSchema = z.strictObject({
   id: idSchema,
@@ -34,6 +45,7 @@ export const rpcContract = defineRpcContract({
           id: idSchema,
           name: z.string(),
           revision: revisionSchema,
+          swatch: swatchSchema,
         }),
       )
       .max(MAX_PRESETS),

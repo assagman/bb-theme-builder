@@ -1,14 +1,10 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { createAppearanceService } from "./src/appearance/service.ts";
-import { createGenerationJobs } from "./src/generation/jobs.ts";
 import {
   chatSweeperService,
   createChatSessions,
 } from "./src/generation/session.ts";
-import {
-  defaultSelection,
-  runGenerationThread,
-} from "./src/generation/thread.ts";
+import { defaultSelection } from "./src/generation/thread.ts";
 import { rpcContract } from "./src/presets/contract.ts";
 import { createPresetStore } from "./src/presets/store.ts";
 
@@ -18,25 +14,15 @@ const CHAT_SWEEPER = "chat-sweeper";
 export default function plugin(bb: BbPluginApi) {
   const store = createPresetStore(bb.storage.kv);
   const appearance = createAppearanceService(bb, store);
-  const generation = createGenerationJobs((input, signal) =>
-    runGenerationThread(bb, input, signal),
-  );
   const chat = createChatSessions(bb, bb.storage.kv);
   bb.background.service(CHAT_SWEEPER, chatSweeperService(bb, chat));
   bb.onDispose(async () => {
     await chat.close();
-    await generation.close();
     await appearance.close();
     await store.close();
   });
   bb.rpc.register(rpcContract, {
     getGenerationSelection: () => defaultSelection(bb),
-    startGeneration: generation.start,
-    getGeneration: ({ requestId }) => generation.get(requestId),
-    cancelGeneration: ({ requestId }) => {
-      generation.cancel(requestId);
-      return {};
-    },
     chatStart: chat.start,
     chatSend: chat.send,
     chatGet: chat.get,

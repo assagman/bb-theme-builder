@@ -12,6 +12,7 @@ import { idSchema } from "../theme/schema.ts";
 import { TOKEN_KEYS } from "../theme/tokens.ts";
 import {
   accentSchema,
+  CHAT_ENDED_MESSAGE,
   type ChatSendInput,
   type ChatStartInput,
   type ChatState,
@@ -60,7 +61,7 @@ const MESSAGES = {
   failed:
     "The agent is unavailable. Check that the selected provider is signed in, then try again.",
   interrupted: "The last message was interrupted. Send it again.",
-  missing: "This chat has ended. Start a new chat.",
+  missing: CHAT_ENDED_MESSAGE,
   busy: "The agent is still answering. Wait for it or press Stop.",
   closed: "Theme Builder is reloading. Reload the page and try again.",
   tooLarge: "The chat is too large to save. Start a new chat.",
@@ -552,13 +553,13 @@ export function createChatSessions(
       });
     },
     /** Heartbeat from the open page; a missing heartbeat lets the sweeper end the chat. */
-    ping({ sessionId }: { sessionId: string }): Promise<Record<string, never>> {
+    ping({ sessionId }: { sessionId: string }): Promise<{ alive: boolean }> {
       ensureOpen();
       return serial.run(async () => {
         const current = await load();
-        if (current?.sessionId === sessionId)
-          record = await persist({ ...current, lastPingAt: now() });
-        return {};
+        if (current?.sessionId !== sessionId) return { alive: false };
+        record = await persist({ ...current, lastPingAt: now() });
+        return { alive: true };
       });
     },
     /** Ends a chat whose page stopped pinging or whose user stopped writing; run on start and on every ping interval. */
