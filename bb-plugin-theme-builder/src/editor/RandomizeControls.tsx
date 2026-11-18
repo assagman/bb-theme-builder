@@ -7,20 +7,27 @@ import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import {
   accentSchema,
+  descriptionSchema,
   type GenerationSelection,
+  MAX_DESCRIPTION_LENGTH,
   selectionSchema,
 } from "../generation/contract.ts";
 import type { rpcContract } from "../presets/contract.ts";
 
 const PREFERENCE_KEY = "theme-builder.generation-selection.v1";
 const COPY = {
-  title: "AI theme randomizer",
+  title: "AI theme generator",
+  description: "Describe your theme (optional)",
+  descriptionPlaceholder:
+    "Warm cream light theme like Cosmic Latte, coffee-brown accent, no stark white",
+  descriptionHelp:
+    "Describe a mood, references, or colors in plain words. Leave blank for a surprise.",
   accent: "Optional accent hex",
   placeholder: "#7c3aed",
   randomize: "Randomize",
   cancel: "Cancel generation",
   undo: "Undo randomization",
-  help: "Generate both palettes with your selected model. Preview first; Save and Apply when ready.",
+  help: "Generate both palettes with your selected model from your description. Preview first; edit any token by hand; Save and Apply when ready.",
   accentHelp:
     "Leave blank for a surprise, or keep this exact accent in both modes.",
   invalid: "Enter a six-digit hex color, such as #7c3aed, or leave blank.",
@@ -43,7 +50,11 @@ type Props = {
   busy: boolean;
   generating: boolean;
   canUndo: boolean;
-  onGenerate: (selection: GenerationSelection, accent: string | null) => void;
+  onGenerate: (
+    selection: GenerationSelection,
+    accent: string | null,
+    description: string | null,
+  ) => void;
   onCancel: () => void;
   onUndo: () => void;
 };
@@ -60,6 +71,8 @@ export function RandomizeControls({
   const [selection, setSelection] = useState(rememberedSelection);
   const [loading, setLoading] = useState(selection === null);
   const [accent, setAccent] = useState("");
+  // Kept across generations so the user can refine the same brief instead of retyping it.
+  const [description, setDescription] = useState("");
   const normalized = accent.trim();
   const valid = normalized === "" || accentSchema.safeParse(normalized).success;
   useEffect(() => {
@@ -104,6 +117,26 @@ export function RandomizeControls({
           {loading ? COPY.loading : COPY.unavailable}
         </p>
       )}
+      <label className="block space-y-2" htmlFor="tb-generation-description">
+        <span className="text-sm">{COPY.description}</span>
+        <textarea
+          id="tb-generation-description"
+          className="flex w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          placeholder={COPY.descriptionPlaceholder}
+          maxLength={MAX_DESCRIPTION_LENGTH}
+          rows={3}
+          disabled={busy}
+          aria-describedby="tb-generation-description-help"
+        />
+      </label>
+      <p
+        id="tb-generation-description-help"
+        className="text-xs text-muted-foreground"
+      >
+        {COPY.descriptionHelp}
+      </p>
       <label className="block space-y-2" htmlFor="tb-generation-accent">
         <span className="text-sm">{COPY.accent}</span>
         <Input
@@ -132,6 +165,7 @@ export function RandomizeControls({
             onGenerate(
               selection,
               normalized === "" ? null : accentSchema.parse(normalized),
+              descriptionSchema.parse(description),
             );
           }}
         >

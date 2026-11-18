@@ -167,7 +167,7 @@ export async function runGenerationThread(
     ...input.selection,
     permissionMode: PERMISSION_MODE,
     title: THREAD_TITLE,
-    prompt: generationPrompt(input.accent, input.requestId),
+    prompt: generationPrompt(input.accent, input.requestId, input.description),
   });
   let complete = false;
   try {

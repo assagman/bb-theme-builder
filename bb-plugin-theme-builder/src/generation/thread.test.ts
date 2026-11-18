@@ -82,6 +82,7 @@ test("uses the selected model in a personal thread, then reads output and archiv
       requestId: randomUUID(),
       selection: SELECTION,
       accent: null,
+      description: null,
     };
     assert.equal(
       await runGenerationThread(bb, input, new AbortController().signal),
@@ -120,6 +121,7 @@ test("rejects forged model choices before spawning a thread", async () => {
           requestId: randomUUID(),
           selection: { ...SELECTION, model: "unknown" },
           accent: null,
+          description: null,
         },
         new AbortController().signal,
       ),
@@ -151,7 +153,12 @@ test("cancellation during spawn stops and archives the late-created thread", asy
     await assert.rejects(
       runGenerationThread(
         bb,
-        { requestId: randomUUID(), selection: SELECTION, accent: null },
+        {
+          requestId: randomUUID(),
+          selection: SELECTION,
+          accent: null,
+          description: null,
+        },
         controller.signal,
       ),
     );
@@ -211,7 +218,12 @@ test("a failed stop does not skip archiving the generation thread", async () => 
     await assert.rejects(
       runGenerationThread(
         bb,
-        { requestId: randomUUID(), selection: SELECTION, accent: null },
+        {
+          requestId: randomUUID(),
+          selection: SELECTION,
+          accent: null,
+          description: null,
+        },
         controller.signal,
       ),
     );

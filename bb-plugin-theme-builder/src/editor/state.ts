@@ -314,7 +314,11 @@ export function useBuilderState() {
     });
   }
 
-  function randomize(selection: GenerationSelection, accent: string | null) {
+  function randomize(
+    selection: GenerationSelection,
+    accent: string | null,
+    description: string | null,
+  ) {
     void run(async () => {
       const before = structuredClone(draft);
       const request = { id: crypto.randomUUID(), cancelled: false };
@@ -325,6 +329,7 @@ export function useBuilderState() {
           requestId: request.id,
           selection,
           accent,
+          description,
         });
         const deadline = Date.now() + GENERATION_TIMEOUT_MS;
         while (result.kind === "running" && !request.cancelled) {

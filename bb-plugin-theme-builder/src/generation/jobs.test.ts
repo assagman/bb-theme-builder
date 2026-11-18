@@ -15,6 +15,7 @@ const input = () => ({
   requestId: randomUUID(),
   selection: SELECTION,
   accent: null,
+  description: null,
 });
 
 test("coalesces duplicate requests and refuses concurrent generation without replacing the first result", async () => {
