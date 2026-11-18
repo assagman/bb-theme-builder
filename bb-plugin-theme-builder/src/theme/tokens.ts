@@ -7,57 +7,90 @@ export const INITIAL_REVISION = 1;
 export const MODES = ["light", "dark"] as const;
 export type Mode = (typeof MODES)[number];
 
+/**
+ * Purpose groups of the Edit tab, in display order. Colors are grouped by what
+ * they style so a user finds "the red ones" without knowing token names.
+ */
+export const TOKEN_GROUPS = ["basics", "text", "status", "code"] as const;
+export type TokenGroup = (typeof TOKEN_GROUPS)[number];
+
+/**
+ * Group that starts collapsed: its colors are rarely edited, so hiding them
+ * keeps the common ones in view. Typed as TokenGroup so renaming a group fails
+ * to compile instead of silently opening every group.
+ */
+export const TOKEN_GROUP_COLLAPSED: TokenGroup = "code";
+
+/**
+ * Every token belongs to exactly one group; `satisfies` makes the compiler
+ * reject a mistyped group, which would otherwise drop the token from the Edit
+ * tab without any error.
+ */
 export const TOKEN_DEFINITIONS = {
-  canvas: { label: "Background", css: "--canvas", basic: true },
-  ink: { label: "Text", css: "--ink", basic: true },
-  primary: { label: "Accent", css: "--primary", basic: true },
+  canvas: { label: "Background", css: "--canvas", group: "basics" },
+  ink: { label: "Text", css: "--ink", group: "basics" },
+  primary: { label: "Accent", css: "--primary", group: "basics" },
   primaryForeground: {
     label: "Accent text",
     css: "--primary-foreground",
-    basic: true,
+    group: "basics",
   },
   mutedForeground: {
     label: "Secondary text",
     css: "--muted-foreground",
-    basic: false,
+    group: "text",
   },
   subtleForeground: {
     label: "Subtle text",
     css: "--subtle-foreground",
-    basic: false,
+    group: "text",
   },
   readbackForeground: {
     label: "Readback text",
     css: "--readback-foreground",
-    basic: false,
+    group: "text",
   },
   destructive: {
     label: "Destructive fill",
     css: "--destructive",
-    basic: false,
+    group: "status",
   },
   destructiveForeground: {
     label: "Destructive button text",
     css: "--destructive-foreground",
-    basic: false,
+    group: "status",
   },
   destructiveText: {
     label: "Destructive text",
     css: "--destructive-text",
-    basic: false,
+    group: "status",
   },
-  warning: { label: "Warning fill", css: "--warning", basic: false },
-  warningText: { label: "Warning text", css: "--warning-text", basic: false },
-  attention: { label: "Attention", css: "--attention", basic: false },
-  success: { label: "Success", css: "--success", basic: false },
-  diffAdded: { label: "Added lines", css: "--diff-added", basic: false },
-  diffRemoved: { label: "Removed lines", css: "--diff-removed", basic: false },
-  prMerged: { label: "Merged pull request", css: "--pr-merged", basic: false },
-  fileAccent: { label: "File paths", css: "--file-accent", basic: false },
-} as const;
+  warning: { label: "Warning fill", css: "--warning", group: "status" },
+  warningText: {
+    label: "Warning text",
+    css: "--warning-text",
+    group: "status",
+  },
+  attention: { label: "Attention", css: "--attention", group: "status" },
+  success: { label: "Success", css: "--success", group: "status" },
+  diffAdded: { label: "Added lines", css: "--diff-added", group: "code" },
+  diffRemoved: { label: "Removed lines", css: "--diff-removed", group: "code" },
+  prMerged: { label: "Merged pull request", css: "--pr-merged", group: "code" },
+  fileAccent: { label: "File paths", css: "--file-accent", group: "code" },
+} as const satisfies Record<
+  string,
+  { label: string; css: string; group: TokenGroup }
+>;
 export type TokenKey = keyof typeof TOKEN_DEFINITIONS;
 export type PaletteTokens = Record<TokenKey, string>;
 export const TOKEN_KEYS = Object.keys(TOKEN_DEFINITIONS) as TokenKey[];
+
+/**
+ * Tokens of one group in definition order; shared by the row list and the
+ * group failure count so both always see the same membership.
+ */
+export const tokensInGroup = (group: TokenGroup): TokenKey[] =>
+  TOKEN_KEYS.filter((key) => TOKEN_DEFINITIONS[key].group === group);
 
 export const UI_FONTS = {
   system: {

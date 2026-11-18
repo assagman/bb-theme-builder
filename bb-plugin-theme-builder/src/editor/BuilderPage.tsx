@@ -54,7 +54,6 @@ export function BuilderPage() {
       <EditTab
         draft={draft}
         mode={mode}
-        valid={valid}
         busy={state.busy}
         onChange={state.setDraft}
       />

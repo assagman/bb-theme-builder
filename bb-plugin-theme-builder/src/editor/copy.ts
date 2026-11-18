@@ -37,18 +37,11 @@ export const COPY = {
   mode: "Palette mode",
   previewNote:
     "Representative preview with a code-font sample. Actual syntax uses bb’s default fallback; accent changes do not recolor it.",
-  basic: "Palette",
-  advanced: "Advanced colors",
   fonts: "Typography",
   uiFont: "UI font",
   codeFont: "Code font",
   dirty: "Unsaved changes",
   saved: "Saved",
-  contrast: "Text contrast",
-  contrastNote:
-    "4.5:1 target for these text pairs. This is not a full accessibility audit.",
-  contrastPass: "Pass",
-  contrastFail: "Low contrast",
   invalid: "Use a name and six-digit lowercase hex colors.",
   unconfirmed: "Reload the page to check the result.",
   defaultSuccess: "Default palette selected.",
@@ -80,6 +73,11 @@ export const COPY = {
   defaultAction: "Use bb default theme",
   defaultConfirm: "Use bb’s default theme in all windows?",
 };
-export const RATIO_DECIMALS = 2;
+export const TOKEN_GROUP_LABELS = {
+  basics: "Basics",
+  text: "Text",
+  status: "Status",
+  code: "Code & git",
+} as const;
 export const SELECT_CLASS =
   "h-9 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring";
