@@ -10,9 +10,11 @@ import {
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { COPY } from "../src/editor/copy.ts";
+import { DRAFT_STORAGE_KEY } from "../src/editor/draft-storage.ts";
 import { generateCss } from "../src/theme/css.ts";
 import { draftSchema } from "../src/theme/schema.ts";
-import { Browser } from "./browser.ts";
+import { Browser, type Page } from "./browser.ts";
 
 const CONFIG = {
   url: process.env.BB_THEME_TEST_URL,
@@ -29,8 +31,17 @@ const DARK = "#151b25";
 const ACCENT = "#3456ab";
 const HOST_CANVAS =
   "getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim()";
-const NAME_SELECTOR = ".tb-edit-column fieldset input";
-const PRESET_SELECTOR = ".tb-edit-column select";
+const FIRST_NAME = `${NAME} first window`;
+const SECOND_NAME = `${NAME} second window`;
+const NAME_INPUT = "#tb-name-input";
+const ACTION_NAME = ".tb-action-name";
+// The plugin has no COPY string or role for this refusal: the page shows the server message verbatim, so its leading words are the only signal.
+const EXTERNAL_CHANGE_MESSAGE = "Appearance changed";
+// Distinct from LIGHT so each edit step proves its own value, not a leftover.
+const RESTORE_EDIT = "#e8ecf1";
+const UNSAVED_EDIT = "#dde2e8";
+const RESIZE_EDIT = "#d3d9e0";
+const RPC_BASE = "/api/v1/plugins/theme-builder/rpc/";
 const LOCAL_HOSTS = ["127.0.0.1", "localhost", "[::1]"];
 const DEFAULT_THEME = "default";
 const EXTERNAL_THEME = "nord";
@@ -114,6 +125,32 @@ assert.equal(
   realpathSync(join(CONFIG.dataDir, "theme")),
   "The actual server must use the disposable data directory.",
 );
+// Saved-theme ids are only known to the server, and exports are named after them.
+const themeId = async (name: string) => {
+  const response = await fetch(`${TEST_URL}${RPC_BASE}listPresets`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  const body = (await response.json()) as {
+    ok: boolean;
+    result: { id: string; name: string }[];
+  };
+  assert.ok(response.ok && body.ok, JSON.stringify(body));
+  const match = body.result.find((theme) => theme.name === name);
+  assert.ok(match, `No saved theme named ${name}`);
+  return match.id;
+};
+const actionName = (page: Page) =>
+  page.evaluate<string>(
+    `document.querySelector(${JSON.stringify(ACTION_NAME)}).textContent`,
+  );
+// Rename goes through the More menu's name form, the only place a name is typed now.
+const renameTheme = async (page: Page, name: string) => {
+  await page.menu(COPY.moreActions, COPY.rename);
+  await page.fill(NAME_INPUT, name);
+  await page.click(COPY.renameConfirm);
+};
 const browser = new Browser(CONFIG.cdp);
 await browser.connect();
 mkdirSync(CONFIG.artifacts, { recursive: true });
@@ -133,21 +170,24 @@ const evidence: Record<string, unknown> = {
 try {
   cli("theme", "set", DEFAULT_THEME);
   cli("theme", "favicon", "set", FAVICON);
-  await light.click("Refresh appearance");
-  await light.status(`Current palette: ${DEFAULT_THEME}`);
+  // The page reads appearance on load, so reload instead of a manual refresh.
+  await light.reload();
+  await dark.reload();
+  assert.equal(appearance().themeId, DEFAULT_THEME);
   await light.wait("!document.documentElement.classList.contains('dark')");
   await dark.wait("document.documentElement.classList.contains('dark')");
+  await light.tab(COPY.tabLabels.edit);
+  await dark.tab(COPY.tabLabels.edit);
   const before = appearance();
   const hostBefore = await light.evaluate(HOST_CANVAS);
   const networkStart = browser.events.length;
-  await light.fill(NAME_SELECTOR, NAME);
   await light.fill('.tb-token input[type="color"]', LIGHT);
   await light.wait(
     `document.querySelector('#light-canvas').value === ${JSON.stringify(LIGHT)}`,
   );
   await light.fill("#light-primary", "#fff");
   await light.wait(
-    "Array.from(document.querySelectorAll('.tb-shell button')).find(button => button.textContent === 'Apply').matches(':disabled')",
+    `Array.from(document.querySelectorAll('.tb-shell button')).find(button => button.textContent === ${JSON.stringify(COPY.apply)}).matches(':disabled')`,
   );
   await light.fill("#light-primary", ACCENT);
   for (const [index, choice] of FONT_CHOICES.entries()) {
@@ -155,7 +195,7 @@ try {
       `(() => { const select = document.querySelectorAll('section[aria-label="Typography"] select')[${index}]; select.value = ${JSON.stringify(choice)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`,
     );
   }
-  await light.click("Dark");
+  await light.click(COPY.dark);
   await light.fill("#dark-canvas", DARK);
   await light.wait(
     `document.querySelector('iframe').srcdoc.includes(${JSON.stringify(DARK)})`,
@@ -196,40 +236,58 @@ try {
     editRequests: resources,
   };
   console.log("Preview isolation passed");
-  await light.click("Save");
-  await light.status("Preset saved.");
-  const id = await light.evaluate<string>(
-    `document.querySelector(${JSON.stringify(PRESET_SELECTOR)}).value`,
-  );
-  evidence.presetId = id;
+  // The edited Neutral theme is unsaved, so Save asks for a name first.
+  await light.click(COPY.save);
+  await light.fill(NAME_INPUT, NAME);
+  await light.click(COPY.save);
+  await light.status(COPY.saveSuccess);
+  assert.equal(await actionName(light), NAME);
+  evidence.themeName = NAME;
   await light.reload();
-  await light.selectPreset(id);
+  await light.tab(COPY.tabLabels.edit);
+  await light.selectTheme(NAME);
   await light.wait(
     `document.querySelector('#light-canvas').value === ${JSON.stringify(LIGHT)}`,
   );
-  await light.click("Dark");
+  await light.click(COPY.dark);
   assert.equal(
     await light.evaluate("document.querySelector('#dark-canvas').value"),
     DARK,
   );
-  await dark.reload();
-  await dark.selectPreset(id);
-  await dark.fill(NAME_SELECTOR, `${NAME} second window`);
-  await light.fill(NAME_SELECTOR, `${NAME} first window`);
-  await light.click("Save");
-  await light.status("Preset saved.");
-  await dark.click("Save");
-  await dark.status("This preset changed in another window.");
-  assert.equal(
-    await dark.evaluate(
-      `document.querySelector(${JSON.stringify(NAME_SELECTOR)}).value`,
-    ),
-    `${NAME} second window`,
+  // An unsaved edit must survive a reload and be announced, with a way to drop it.
+  await light.click(COPY.light);
+  await light.fill("#light-canvas", RESTORE_EDIT);
+  await light.wait(
+    `JSON.parse(localStorage.getItem(${JSON.stringify(DRAFT_STORAGE_KEY)}) ?? 'null')?.draft.light.canvas === ${JSON.stringify(RESTORE_EDIT)}`,
   );
+  await light.reload();
+  await light.status(`${COPY.restored} ${NAME}`);
+  await light.tab(COPY.tabLabels.edit);
+  await light.wait(
+    `document.querySelector('#light-canvas').value === ${JSON.stringify(RESTORE_EDIT)}`,
+  );
+  await light.status(COPY.dirty);
+  await light.dialog(() => light.click(COPY.discardAction), true);
+  await light.wait(
+    `document.querySelector('#light-canvas').value === ${JSON.stringify(LIGHT)}`,
+  );
+  await light.status(COPY.saved);
+  evidence.restoredNotice =
+    "unsaved edit restored after reload, then discarded";
+  await dark.reload();
+  await dark.tab(COPY.tabLabels.edit);
+  await dark.selectTheme(NAME);
+  await renameTheme(dark, SECOND_NAME);
+  await renameTheme(light, FIRST_NAME);
+  await light.click(COPY.save);
+  await light.status(COPY.saveSuccess);
+  await dark.click(COPY.save);
+  await dark.status(COPY.conflict);
+  assert.equal(await actionName(dark), SECOND_NAME);
   evidence.competingSave = "conflict preserves draft";
   console.log("Persistence and competing saves passed");
-  await light.click("Apply");
-  await light.status("Palette applied to all bb windows.");
+  await light.click(COPY.apply);
+  await light.status(COPY.applySuccess);
   // BB defers hidden-window appearance sync; foreground each window before checking its rendered palette.
   await light.send("Page.bringToFront");
   await light.wait(`${HOST_CANVAS} === ${JSON.stringify(LIGHT)}`);
@@ -246,8 +304,8 @@ try {
     await dark.evaluate("document.documentElement.classList.contains('dark')"),
     true,
   );
-  await light.click("Light");
-  await dark.click("Dark");
+  await light.click(COPY.light);
+  await dark.click(COPY.dark);
   for (const page of [light, dark])
     assert.deepEqual(
       await page.previewEvaluate(TOKEN_VALUES),
@@ -262,37 +320,36 @@ try {
     join(CONFIG.artifacts, "desktop.png"),
     Buffer.from(desktop.data, "base64"),
   );
-  await light.click("Dark");
+  await light.click(COPY.dark);
   await light.fill("#dark-canvas", "#202630");
-  await light.click("Save");
-  await light.status("Preset saved.");
+  await light.click(COPY.save);
+  await light.status(COPY.saveSuccess);
   assert.deepEqual(appearance(), applied);
-  await light.click("Restore previous theme");
-  await light.status("Previous palette restored.");
+  await light.menu(COPY.moreActions, COPY.restore);
+  await light.status(COPY.restoreSuccess);
   assert.equal(appearance().themeId, DEFAULT_THEME);
-  await light.click("Apply");
-  await light.status("Palette applied to all bb windows.");
+  await light.click(COPY.apply);
+  await light.status(COPY.applySuccess);
   cli("theme", "set", EXTERNAL_THEME);
-  await light.click("Restore previous theme");
-  await light.status("Appearance changed.");
+  await light.menu(COPY.moreActions, COPY.restore);
+  await light.status(EXTERNAL_CHANGE_MESSAGE);
   assert.equal(appearance().themeId, EXTERNAL_THEME);
   evidence.restore = "restores previous; refuses subsequent external selection";
-  await light.click("Refresh appearance");
-  await light.status(`Current palette: ${EXTERNAL_THEME}`);
-  await light.click("Apply");
-  await light.status("Palette applied to all bb windows.");
+  // A refused restore refreshes the observed appearance, so Apply can proceed without a manual refresh.
+  await light.click(COPY.apply);
+  await light.status(COPY.applySuccess);
   const retained = appearance();
   cli("plugin", "disable", "theme-builder");
   assert.deepEqual(appearance(), retained);
   cli("plugin", "enable", "theme-builder");
   await light.reload();
-  await light.selectPreset(id);
+  await light.tab(COPY.tabLabels.edit);
+  await light.selectTheme(FIRST_NAME);
   assert.deepEqual(appearance(), retained);
-  await light.click("Restore previous theme");
-  await light.status("Previous palette restored.");
+  await light.menu(COPY.moreActions, COPY.restore);
+  await light.status(COPY.restoreSuccess);
   assert.equal(appearance().themeId, EXTERNAL_THEME);
-  evidence.disableEnable =
-    "preset and applied artifact retained; restore works";
+  evidence.disableEnable = "theme and applied artifact retained; restore works";
   console.log("Apply, restore, external conflicts, and disable/enable passed");
   await browser.send("Browser.setDownloadBehavior", {
     behavior: "allow",
@@ -300,11 +357,9 @@ try {
     browserContextId: light.contextId,
     eventsEnabled: true,
   });
-  await light.click("Export JSON");
-  await light.click("Export CSS");
-  await light.wait(
-    "!document.querySelector('.tb-edit-column fieldset').disabled",
-  );
+  await light.menu(COPY.moreActions, COPY.exportJson);
+  await light.menu(COPY.moreActions, COPY.exportCss);
+  const id = await themeId(FIRST_NAME);
   const downloadPrefix = `theme-builder-${id.replaceAll("-", "").slice(0, 12)}`;
   const deadline = Date.now() + DOWNLOAD_TIMEOUT_MS;
   while (
@@ -334,30 +389,34 @@ try {
     generateCss(exported),
   );
   evidence.exports = { jsonFile, cssFile, deterministicParity: true };
-  await light.fill(NAME_SELECTOR, `${NAME} unsaved`);
-  await light.dialog(() => light.selectPreset("", id), false);
+  // Declining the discard prompt must keep the unsaved edit and the open theme.
+  // A background page drops confirm() dialogs at once, so the window must be foremost for the prompt checks.
+  await light.send("Page.bringToFront");
+  await light.tab(COPY.tabLabels.edit);
+  await light.click(COPY.light);
+  await light.fill("#light-canvas", UNSAVED_EDIT);
+  await light.dialog(
+    () => light.selectTheme(COPY.neutralBuiltIn, FIRST_NAME),
+    false,
+  );
   assert.equal(
-    await light.evaluate(
-      `document.querySelector(${JSON.stringify(NAME_SELECTOR)}).value`,
-    ),
-    `${NAME} unsaved`,
+    await light.evaluate("document.querySelector('#light-canvas').value"),
+    UNSAVED_EDIT,
   );
-  await light.click("Duplicate");
-  await light.click("Save");
-  await light.status("Preset saved.");
-  const duplicateId = await light.evaluate<string>(
-    `document.querySelector(${JSON.stringify(PRESET_SELECTOR)}).value`,
-  );
+  await light.menu(COPY.moreActions, COPY.duplicate);
+  await light.click(COPY.save);
+  await light.click(COPY.save);
+  await light.status(COPY.saveSuccess);
+  const duplicateId = await themeId(`${FIRST_NAME}${COPY.copySuffix}`);
   assert.notEqual(duplicateId, id);
-  await light.dialog(() => light.click("Delete"), true);
-  await light.status("Preset deleted. Applied themes were retained.");
-  await light.selectPreset(id);
-  evidence.presetActions =
+  await light.dialog(() => light.menu(COPY.moreActions, COPY.remove), true);
+  await light.status(COPY.deleted);
+  await light.selectTheme(FIRST_NAME);
+  evidence.themeActions =
     "rename, duplicate, delete, and discard cancellation passed";
-  await light.fill(NAME_SELECTOR, `${NAME} resize draft`);
   await light.evaluate("document.documentElement.style.zoom = '2'");
-  await light.click("Dark");
-  await light.click("Light");
+  await light.click(COPY.dark);
+  await light.click(COPY.light);
   assert.equal(
     await light.evaluate(
       "document.querySelector('.tb-shell').scrollWidth <= document.querySelector('.tb-shell').clientWidth",
@@ -375,31 +434,21 @@ try {
   await light.evaluate("document.documentElement.style.zoom = ''");
   evidence.zoom =
     "200% browser CSS zoom: controls usable, no horizontal overflow";
+  await light.fill("#light-canvas", RESIZE_EDIT);
   await light.send("Emulation.setDeviceMetricsOverride", {
     width: 600,
     height: 850,
     deviceScaleFactor: 1,
     mobile: false,
   });
+  // The stacked layout must keep the unsaved edit and the three tabs.
   assert.equal(
-    await light.evaluate(
-      "getComputedStyle(document.querySelector('.tb-view-tabs')).display",
-    ),
-    "flex",
+    await light.evaluate("document.querySelectorAll('[role=tab]').length"),
+    Object.keys(COPY.tabLabels).length,
   );
-  await light.click("Preview");
   assert.equal(
-    await light.evaluate(
-      "getComputedStyle(document.querySelector('.tb-edit-column')).display",
-    ),
-    "none",
-  );
-  await light.click("Edit");
-  assert.equal(
-    await light.evaluate(
-      `document.querySelector(${JSON.stringify(NAME_SELECTOR)}).value`,
-    ),
-    `${NAME} resize draft`,
+    await light.evaluate("document.querySelector('#light-canvas').value"),
+    RESIZE_EDIT,
     "Changing shell layout must preserve the draft",
   );
   assert.equal(
@@ -412,24 +461,28 @@ try {
     ),
     true,
   );
+  // Arrow keys move between tabs, as the tabs pattern promises.
   await light.evaluate(
-    `document.querySelector(${JSON.stringify(NAME_SELECTOR)}).focus()`,
+    "document.querySelector('[role=tab][aria-selected=true]').focus()",
   );
   await light.send("Input.dispatchKeyEvent", {
     type: "keyDown",
-    key: "Tab",
-    code: "Tab",
-    windowsVirtualKeyCode: 9,
+    key: "ArrowRight",
+    code: "ArrowRight",
+    windowsVirtualKeyCode: 39,
   });
   await light.send("Input.dispatchKeyEvent", {
     type: "keyUp",
-    key: "Tab",
-    code: "Tab",
-    windowsVirtualKeyCode: 9,
+    key: "ArrowRight",
+    code: "ArrowRight",
+    windowsVirtualKeyCode: 39,
   });
-  assert.equal(
-    await light.evaluate("document.activeElement.textContent"),
-    "Light",
+  // Focus follows the key event after React commits the tab change, so it is awaited rather than read once.
+  await light.wait(
+    `document.activeElement?.textContent === ${JSON.stringify(COPY.tabLabels.randomize)}`,
+  );
+  await light.wait(
+    "document.querySelector('[role=tab][aria-selected=true]') === document.activeElement",
   );
   const { data } = await light.send<{ data: string }>(
     "Page.captureScreenshot",

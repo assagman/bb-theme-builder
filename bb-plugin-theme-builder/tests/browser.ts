@@ -8,6 +8,15 @@ const CONNECT_ERROR = "Could not connect to the test browser";
 const CLOSED_ERROR = "The test browser disconnected";
 const SCREENSHOT_METHOD = "Page.captureScreenshot";
 const FOREGROUND_METHOD = "Page.bringToFront";
+// The page opens on the AI tab, so colour fields are not mounted yet; the tab strip is the first thing every tab shares.
+const READY_EXPRESSION = "document.querySelector('[role=tablist]') !== null";
+// The preview iframe remounts on every document change, so its CDP target can briefly disappear or detach mid-call.
+const PREVIEW_ATTEMPTS = 20;
+const PREVIEW_TOTAL_MS = 10000;
+const PREVIEW_RETRY_MS = 100;
+// The dialog can be closed by the browser itself within moments, so it is polled much faster than page conditions.
+const DIALOG_POLL_MS = 5;
+const SHELL_SCOPE = ".tb-shell";
 const PAINT_SETTLED_EXPRESSION =
   "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))";
 class BrowserTransportError extends Error {
@@ -140,7 +149,7 @@ export class Browser {
       mobile: false,
     });
     await page.send("Page.navigate", { url });
-    await page.wait("document.querySelector('#light-canvas') !== null");
+    await page.wait(READY_EXPRESSION);
     return page;
   }
 
@@ -199,12 +208,25 @@ export class Page {
       `Page condition timed out: ${expression}; observed ${JSON.stringify(observed)}`,
     );
   }
-  async click(label: string) {
-    const expression = `Array.from(document.querySelectorAll('.tb-shell button')).find(b => b.textContent === ${JSON.stringify(label)})`;
+  // `scope` lets callers pick the roll button over the tab of the same name.
+  async click(label: string, scope = SHELL_SCOPE) {
+    const expression = `Array.from(document.querySelectorAll(${JSON.stringify(`${scope} button`)})).find(b => b.textContent === ${JSON.stringify(label)})`;
     await this.wait(
       `Boolean(${expression} && !(${expression}).matches(':disabled'))`,
     );
     await this.evaluate(`(${expression}).click()`);
+  }
+  async tab(label: string) {
+    await this.click(label, "[role=tablist]");
+    await this.wait(
+      `Array.from(document.querySelectorAll('[role=tab]')).some(t => t.textContent === ${JSON.stringify(label)} && t.getAttribute('aria-selected') === 'true')`,
+    );
+  }
+  async menu(moreLabel: string, label: string) {
+    await this.evaluate(
+      `document.querySelector(${JSON.stringify(`button[aria-label="${moreLabel}"]`)}).click()`,
+    );
+    await this.click(label, "[role=menu]");
   }
   async fill(selector: string, value: string) {
     await this.evaluate(`(() => {
@@ -213,15 +235,21 @@ export class Page {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     })()`);
   }
-  async selectPreset(id: string, expected = id) {
+  // Cards are matched by name because ids are unknown until the first save; `expected` covers a declined discard prompt.
+  async selectTheme(name: string, expected = name) {
+    await this.wait(
+      `Array.from(document.querySelectorAll('.tb-list button')).some(b => b.textContent.includes(${JSON.stringify(name)}) && !b.disabled)`,
+    );
     await this.evaluate(
-      `(() => { const select = document.querySelector('.tb-edit-column select'); select.value = ${JSON.stringify(id)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`,
+      `Array.from(document.querySelectorAll('.tb-list button')).find(b => b.querySelector('.tb-card-name').textContent === ${JSON.stringify(name)}).click()`,
     );
     await this.wait(
-      `document.querySelector('.tb-edit-column select').value === ${JSON.stringify(expected)} && !document.querySelector('.tb-edit-column fieldset').disabled`,
+      `Array.from(document.querySelectorAll('.tb-list [aria-current=true] .tb-card-name')).some(n => n.textContent === ${JSON.stringify(expected)}) && !Array.from(document.querySelectorAll('.tb-list button')).some(b => b.disabled)`,
     );
   }
   async dialog(action: () => Promise<unknown>, accept: boolean) {
+    // Chrome drops a confirm() from a background page at once, so the page must be foremost when the prompt opens.
+    await this.browser.send(FOREGROUND_METHOD, {}, this.sessionId);
     const start = this.browser.events.length;
     const task = action();
     const deadline = Date.now() + TIMEOUT_MS;
@@ -236,7 +264,7 @@ export class Page {
     ) {
       if (Date.now() > deadline)
         throw new Error("Expected a confirmation dialog");
-      await delay(POLL_MS);
+      await delay(DIALOG_POLL_MS);
     }
     await this.send("Page.handleJavaScriptDialog", { accept });
     await task;
@@ -247,6 +275,24 @@ export class Page {
     );
   }
   async previewEvaluate<T>(expression: string): Promise<T> {
+    const deadline = Date.now() + PREVIEW_TOTAL_MS;
+    let lastCause: unknown;
+    let attempts = 0;
+    while (attempts < PREVIEW_ATTEMPTS && Date.now() < deadline) {
+      attempts += 1;
+      try {
+        return await this.previewEvaluateOnce<T>(expression);
+      } catch (cause) {
+        lastCause = cause;
+        await delay(PREVIEW_RETRY_MS);
+      }
+    }
+    throw new Error(
+      `previewEvaluate failed after ${attempts} attempts: ${String(lastCause)}`,
+      { cause: lastCause },
+    );
+  }
+  private async previewEvaluateOnce<T>(expression: string): Promise<T> {
     const { targetInfos } = await this.browser.send<{
       targetInfos: {
         targetId: string;
@@ -278,7 +324,7 @@ export class Page {
     await this.evaluate("window.__themeBuilderReloadMarker = true");
     await this.send("Page.reload");
     await this.wait(
-      "window.__themeBuilderReloadMarker !== true && document.querySelector('#light-canvas') !== null",
+      `window.__themeBuilderReloadMarker !== true && ${READY_EXPRESSION}`,
     );
   }
   async dispose() {

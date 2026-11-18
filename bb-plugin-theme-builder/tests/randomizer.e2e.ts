@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { COPY } from "../src/editor/copy.ts";
+import { DRAFT_STORAGE_KEY } from "../src/editor/draft-storage.ts";
 import { Browser } from "./browser.ts";
 
 const CONFIG = {
@@ -12,22 +14,15 @@ const CONFIG = {
 };
 const ROUTE = "/plugins/theme-builder/builder";
 const ACCENT = "#A34BC5";
-const DEADLINE_MS = 210000;
-const POLL_MS = 1000;
+const INVALID_ACCENT = "#bad";
+const ROLLS = 3;
 const PREVIEW_TIMEOUT_MS = 10000;
 const PREVIEW_POLL_MS = 50;
-const ACCENT_SELECTOR = "#tb-generation-accent";
-const NAME_SELECTOR = ".tb-edit-column fieldset input";
-const PICKER = 'button[aria-label="Provider, model and reasoning"]';
-const PREFERENCE_KEY = "theme-builder.generation-selection.v1";
+const PANEL = "[role=tabpanel]";
+const ACCENT_SELECTOR = `${PANEL} input[placeholder=${JSON.stringify(COPY.accentPlaceholder)}]`;
+const NAME_INPUT = "#tb-name-input";
 const NAME = "Randomizer browser journey";
 const UI_FONT = "humanist";
-const UNKNOWN_MODEL = "unavailable-model-for-recovery-test";
-const ERROR_MESSAGES = [
-  "Generation failed.",
-  "Generation timed out.",
-  "Generation could not finish.",
-];
 const LOCAL_HOSTS = ["127.0.0.1", "localhost", "[::1]"];
 
 assert.ok(
@@ -64,118 +59,64 @@ const page = await browser.page(CONFIG.url + ROUTE, "light");
 const preview = () =>
   page.evaluate<string>("document.querySelector('iframe').srcdoc");
 const evidence: Record<string, unknown> = {};
-let applied = false;
 const failures: unknown[] = [];
-
-async function generation() {
-  await page.click("Randomize");
-  const deadline = Date.now() + DEADLINE_MS;
-  while (Date.now() < deadline) {
-    const text = await page.evaluate<string>(
-      "document.querySelector('.tb-shell').innerText",
-    );
-    if (text.includes("Both palettes generated.")) return;
-    assert.ok(!ERROR_MESSAGES.some((message) => text.includes(message)), text);
-    await delay(POLL_MS);
-  }
-  throw new Error("Real LLM generation timed out");
-}
+const roll = () => page.click(COPY.randomize, PANEL);
+const lightCanvas = () =>
+  page.evaluate<string>("document.querySelector('#light-canvas').value");
 
 // srcdoc updates before its isolated document paints; proof must inspect the rendered palette.
-async function renderedPreview(mode: "light" | "dark") {
-  const canvas = await page.evaluate<string>(
-    `document.querySelector('#${mode}-canvas').value`,
-  );
+async function renderedPrimary(mode: "light" | "dark", primary: string) {
+  const expression = `document.documentElement.classList.contains('dark') === ${mode === "dark"} && getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() === ${JSON.stringify(primary)}`;
   const deadline = Date.now() + PREVIEW_TIMEOUT_MS;
-  const expression = `document.documentElement.classList.contains('dark') === ${mode === "dark"} && getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() === ${JSON.stringify(ACCENT.toLowerCase())} && getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim() === ${JSON.stringify(canvas)}`;
   while (Date.now() < deadline) {
-    if (await page.previewEvaluate(expression)) return;
+    const rendered = await page.previewEvaluate(expression);
+    if (rendered) return;
     await delay(PREVIEW_POLL_MS);
   }
-  throw new Error("The rendered preview did not reflect the generated palette");
+  throw new Error(`The rendered ${mode} preview did not keep the accent`);
+}
+
+// Rolls are random, so the proof is that the screen changed and that each step is reversible.
+async function rollAndExpectChange() {
+  const previous = await preview();
+  await roll();
+  await page.wait(
+    `document.querySelector('iframe').srcdoc !== ${JSON.stringify(previous)}`,
+  );
+  return preview();
 }
 
 try {
-  await page.wait(`document.querySelector(${JSON.stringify(PICKER)}) !== null`);
-  await page.evaluate(
-    `document.querySelector(${JSON.stringify(PICKER)}).click()`,
-  );
-  await page.wait(
-    "document.querySelectorAll('[role=dialog] [role=option]').length > 1",
-  );
-  await page.evaluate(
-    "document.querySelectorAll('[role=dialog] [role=option]')[1].click()",
-  );
-  await page.send("Input.dispatchKeyEvent", {
-    type: "keyDown",
-    key: "Escape",
-    code: "Escape",
-    windowsVirtualKeyCode: 27,
-  });
-  await page.send("Input.dispatchKeyEvent", {
-    type: "keyUp",
-    key: "Escape",
-    code: "Escape",
-    windowsVirtualKeyCode: 27,
-  });
-  const selection = await page.evaluate<string>(
-    `localStorage.getItem(${JSON.stringify(PREFERENCE_KEY)})`,
-  );
-  assert.ok(selection);
-  await page.reload();
-  assert.equal(
-    await page.evaluate(
-      `localStorage.getItem(${JSON.stringify(PREFERENCE_KEY)})`,
-    ),
-    selection,
-  );
-  evidence.selection = JSON.parse(selection);
-  await page.fill(NAME_SELECTOR, NAME);
+  // Fonts and name are the user's own, so a roll must leave them alone.
+  await page.tab(COPY.tabLabels.edit);
   await page.evaluate(
     `(() => { const select = document.querySelector('section[aria-label="Typography"] select'); select.value = ${JSON.stringify(UI_FONT)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`,
   );
-  await page.fill(ACCENT_SELECTOR, "#bad");
+  await page.menu(COPY.moreActions, COPY.rename);
+  await page.fill(NAME_INPUT, NAME);
+  await page.click(COPY.renameConfirm);
+  const appearance = await rpc("getAppearance");
+  const savedBefore = await rpc("listPresets");
+  await page.tab(COPY.tabLabels.randomize);
+  await page.fill(ACCENT_SELECTOR, INVALID_ACCENT);
+  await page.status(COPY.accentInvalid);
   assert.equal(
     await page.evaluate(
-      "Array.from(document.querySelectorAll('.tb-shell button')).find(b => b.textContent === 'Randomize').disabled",
+      `Array.from(document.querySelectorAll(${JSON.stringify(`${PANEL} button`)})).find(b => b.textContent === ${JSON.stringify(COPY.randomize)}).disabled`,
     ),
     true,
   );
   await page.fill(ACCENT_SELECTOR, ACCENT);
-  const before = await preview();
-  const appearance = await rpc("getAppearance");
-  const savedBefore = await rpc("listPresets");
-  await generation();
-  assert.equal(
-    await page.evaluate("document.querySelector('#light-primary').value"),
-    ACCENT.toLowerCase(),
-  );
-  await renderedPreview("light");
-  await page.click("Dark");
-  await renderedPreview("dark");
-  assert.equal(
-    await page.evaluate("document.querySelector('#dark-primary').value"),
-    ACCENT.toLowerCase(),
-  );
-  await page.click("Light");
-  await renderedPreview("light");
-  assert.equal(
-    await page.evaluate(
-      `document.querySelector(${JSON.stringify(NAME_SELECTOR)}).value`,
-    ),
-    NAME,
-  );
-  assert.equal(
-    await page.evaluate(
-      "document.querySelector('section[aria-label=\"Typography\"] select').value",
-    ),
-    UI_FONT,
-  );
-  assert.notEqual(await preview(), before);
-  assert.deepEqual(await rpc("getAppearance"), appearance);
-  assert.deepEqual(await rpc("listPresets"), savedBefore);
-  evidence.accent =
-    "both modes exact; uppercase accepted; draft name/fonts retained; no implicit save/apply";
+  const palettes = [await preview()];
+  for (let index = 0; index < ROLLS; index += 1) {
+    palettes.push(await rollAndExpectChange());
+    await renderedPrimary("light", ACCENT.toLowerCase());
+  }
+  assert.equal(new Set(palettes).size, ROLLS + 1, "Every roll must differ");
+  await page.click(COPY.dark);
+  await renderedPrimary("dark", ACCENT.toLowerCase());
+  await page.click(COPY.light);
+  evidence.accent = `primary keeps the accent in both modes across ${ROLLS} rolls`;
   const shot = await page.send<{ data: string }>("Page.captureScreenshot", {
     format: "png",
     captureBeyondViewport: true,
@@ -184,78 +125,55 @@ try {
     join(CONFIG.artifacts, "generated.png"),
     Buffer.from(shot.data, "base64"),
   );
-  await page.click("Save");
-  await page.status("Preset saved.");
-  await page.click("Apply");
-  applied = true;
-  await page.status("Palette applied to all bb windows.");
-  await page.click("Restore previous theme");
-  await page.status("Previous palette restored.");
-  applied = false;
-  assert.equal((await rpc("getAppearance")).themeId, appearance.themeId);
-  await page.click("Undo randomization");
-  assert.equal(await preview(), before);
-  evidence.applyRestoreUndo = true;
+  // Back walks the trail to the pre-roll palette; Forward returns to the newest roll.
+  for (let index = ROLLS - 1; index >= 0; index -= 1) {
+    await page.click(COPY.rollBack, PANEL);
+    await page.wait(
+      `document.querySelector('iframe').srcdoc === ${JSON.stringify(palettes[index])}`,
+    );
+  }
+  for (let index = 1; index <= ROLLS; index += 1) {
+    await page.click(COPY.rollForward, PANEL);
+    await page.wait(
+      `document.querySelector('iframe').srcdoc === ${JSON.stringify(palettes[index])}`,
+    );
+  }
+  evidence.backForward = "Back restores each earlier palette; Forward replays";
+  // A blank accent is the free roll.
   await page.fill(ACCENT_SELECTOR, "");
-  await generation();
-  assert.notEqual(await preview(), before);
+  const free = await rollAndExpectChange();
   evidence.freeAccent = true;
-  await page.send("Emulation.setDeviceMetricsOverride", {
-    width: 600,
-    height: 850,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
-  await page.click("Preview");
-  await page.click("Edit");
+  // Rolls only edit the draft; nothing may be saved or applied implicitly.
+  assert.deepEqual(await rpc("getAppearance"), appearance);
+  assert.deepEqual(await rpc("listPresets"), savedBefore);
+  // The draft must outlive a reload, with the notice that says so.
+  await page.tab(COPY.tabLabels.edit);
+  const canvas = await lightCanvas();
+  await page.wait(
+    `JSON.parse(localStorage.getItem(${JSON.stringify(DRAFT_STORAGE_KEY)}) ?? 'null')?.draft.light.canvas === ${JSON.stringify(canvas)}`,
+  );
+  await page.reload();
+  await page.status(`${COPY.restored} ${NAME}`);
+  await page.tab(COPY.tabLabels.edit);
+  assert.equal(await lightCanvas(), canvas);
   assert.equal(
     await page.evaluate(
-      "document.querySelector('.tb-shell').scrollWidth <= document.querySelector('.tb-shell').clientWidth",
+      "document.querySelector('section[aria-label=\"Typography\"] select').value",
     ),
-    true,
+    UI_FONT,
   );
-  await page.click("Undo randomization");
-  assert.equal(await preview(), before);
-  await page.click("Randomize");
-  await page.click("Cancel generation");
-  await page.status("Generation cancelled.");
-  assert.equal(await preview(), before);
-  evidence.cancelAndRemount = true;
-  await page.reload();
-  // The picker repairs stale selections, so emulate a model disappearing after selection.
-  await page.send("Fetch.enable", {
-    patterns: [
-      { urlPattern: "*/rpc/startGeneration", requestStage: "Request" },
-    ],
-  });
-  const eventStart = browser.events.length;
-  const failedBefore = await preview();
-  await page.click("Randomize");
-  const requestDeadline = Date.now() + DEADLINE_MS;
-  let paused: (typeof browser.events)[number] | undefined;
-  while (Date.now() < requestDeadline) {
-    paused = browser.events
-      .slice(eventStart)
-      .find(
-        (event) =>
-          event.sessionId === page.sessionId &&
-          event.method === "Fetch.requestPaused",
-      );
-    if (paused) break;
-    await delay(POLL_MS);
-  }
-  assert.ok(paused?.params);
-  const request = paused.params.request as { postData: string };
-  const input = JSON.parse(request.postData);
-  input.selection.model = UNKNOWN_MODEL;
-  await page.send("Fetch.continueRequest", {
-    requestId: paused.params.requestId,
-    postData: Buffer.from(JSON.stringify(input)).toString("base64"),
-  });
-  await page.send("Fetch.disable");
-  await page.status("Generation failed.");
-  assert.equal(await preview(), failedBefore);
-  evidence.unavailableModel = "error preserves draft";
+  assert.equal(
+    await page.evaluate(
+      "document.querySelector('.tb-action-name').textContent",
+    ),
+    NAME,
+  );
+  await page.wait(
+    `document.querySelector('iframe').srcdoc === ${JSON.stringify(free)}`,
+  );
+  await page.status(COPY.dirty);
+  evidence.draftReload =
+    "rolled palette, name, and fonts restored with the notice; nothing saved or applied";
   writeFileSync(
     join(CONFIG.artifacts, "evidence.json"),
     JSON.stringify(evidence, null, 2),
@@ -265,13 +183,6 @@ try {
   failures.push(cause);
 } finally {
   try {
-    if (applied) {
-      const current = await rpc("getAppearance");
-      await rpc("restoreAppearance", {
-        operationId: current.operationId,
-        observedFingerprint: current.fingerprint,
-      });
-    }
     await page.dispose();
   } catch (cleanupFailure) {
     // Preserve both failures, then report them outside finally so cleanup cannot replace the original cause.

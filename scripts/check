@@ -38,4 +38,6 @@ run_step 'markdown' "$local_timeout" markdownlint-cli2 --config .githooks/lib/ma
 run_step 'isolated plugin install' "$local_timeout" bb plugin install "$root/bb-plugin-theme-builder" --yes
 cd "$root/bb-plugin-theme-builder"
 run_step 'browser smoke' "$browser_timeout" npm run smoke
+# The Randomize journey needs no model, so it can gate every push like the main journey.
+run_step 'browser smoke (randomize)' "$browser_timeout" npm run smoke:randomizer
 printf 'All project checks passed.\n'
