@@ -150,12 +150,23 @@ fi
 # CSV: nloc,ccn,tokens,params,length,"location","file","function","long_name",start,end
 csv_re='^[0-9]+,([0-9]+),[0-9]+,[0-9]+,([0-9]+),"(.*)",([0-9]+),([0-9]+)$'
 findings=()
-while IFS= read -r row; do
+# A quoted long_name can span lines (multi-line JSX in a callback signature),
+# so one record may arrive as several physical lines. Join lines until the
+# record matches; a record still incomplete at the end of the report fails
+# closed below.
+pending=''
+while IFS= read -r line; do
+    if [ -n "$pending" ]; then
+        row="$pending"$'\n'"$line"
+    else
+        row="$line"
+    fi
     [ -n "$row" ] || continue
     if ! [[ "$row" =~ $csv_re ]]; then
-        echo >&2 "❌ Push rejected: cannot read a $SCANNER report line: $row"
-        exit 1
+        pending="$row"
+        continue
     fi
+    pending=''
     ccn="${BASH_REMATCH[1]}"
     length="${BASH_REMATCH[2]}"
     middle="${BASH_REMATCH[3]}"
@@ -174,6 +185,10 @@ while IFS= read -r row; do
     fi
     findings+=("${files[$i]}:$start: $function_name: $problems")
 done <<<"$report"
+if [ -n "$pending" ]; then
+    echo >&2 "❌ Push rejected: cannot read a $SCANNER report line: $pending"
+    exit 1
+fi
 
 if [ "${#findings[@]}" -gt 0 ]; then
     echo >&2 "❌ Push rejected: the push changes functions that are too complex at ${tip:0:12}:"
