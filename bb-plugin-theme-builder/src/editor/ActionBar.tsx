@@ -1,31 +1,30 @@
 import { type ReactNode, useState } from "react";
 import { Button } from "../../components/ui/button.tsx";
-import { NEUTRAL_PRESET } from "../theme/defaults.ts";
+import { MAX_NAME_LENGTH } from "../theme/tokens.ts";
+import type { AppearanceView } from "../themes/contract.ts";
 import { COPY } from "./copy.ts";
 import { type MenuItem, MoreMenu } from "./MoreMenu.tsx";
-import { NameForm, type Naming } from "./NameForm.tsx";
+import { NameForm } from "./NameForm.tsx";
 import type { ExportFormat } from "./state.ts";
-import type { AppearanceState } from "./store.ts";
+import type { SourceKind } from "./store.ts";
 
 export type ActionBarProps = {
+  /** The open theme's name as the dropdown shows it. */
   name: string;
-  /** Text after the name: "Unsaved changes", "Saved", or the built-in note. */
+  /** Text after the name: "Unsaved changes", "Saved", or what kind of theme it is. */
   status: string;
   dirty: boolean;
   busy: boolean;
-  /** False when the draft fails the schema; Save and Apply stay off so nothing invalid is sent. */
+  /** False when the draft fails the schema; nothing that writes is enabled then. */
   valid: boolean;
-  /** Saved themes can be exported and deleted; unsaved ones must be saved first. */
-  hasSaved: boolean;
-  /** Apply and Restore state as the server last reported it, plus whether the restore target went missing. */
-  appearance: { current: AppearanceState | null; missingRestore: boolean };
+  /** The theme the copy came from: only custom themes can be overwritten, only owned ones deleted, the active one never. */
+  source: { kind: SourceKind; owned: boolean; active: boolean };
+  /** Use theme and Restore state as the server last reported it, plus whether the restore target went missing. */
+  appearance: { current: AppearanceView | null; missingRestore: boolean };
   onDiscard: () => void;
-  onSave: () => void;
-  onApply: () => void;
-  /** Used by the name form: names a new theme and saves (and applies) it in one step. */
-  onSaveAs: (name: string, options: { apply: boolean }) => void;
-  onRename: (name: string) => void;
-  onDuplicate: () => void;
+  onOverwrite: () => void;
+  onSaveAs: (name: string) => void;
+  onUseTheme: () => void;
   onDelete: () => void;
   onExport: (format: ExportFormat) => void;
   onRestore: () => void;
@@ -35,47 +34,45 @@ export type ActionBarProps = {
 };
 
 /**
- * Save and Apply refuse while a request runs or the draft is invalid; Save also has nothing to do on a
- * saved theme without edits, and Apply needs the server's appearance state before it can switch.
+ * When each primary action is off. Writes need a valid draft and an idle
+ * page; Overwrite also needs edits to a custom theme; Use theme switches bb
+ * to the saved file, so it waits until the edits are saved.
  */
 function primaryDisabled(props: ActionBarProps) {
   const blocked = props.busy || !props.valid;
   return {
-    save: blocked || (!props.dirty && props.hasSaved),
-    apply: blocked || props.appearance.current === null,
+    overwrite: blocked || !props.dirty,
+    saveAs: blocked,
+    use:
+      props.busy ||
+      props.dirty ||
+      props.source.active ||
+      props.source.kind === "gone" ||
+      props.appearance.current === null,
   };
 }
 
-/**
- * The rarer actions behind the More menu. Kept out of the component so each rule for when an action is
- * off reads on its own; `startRename` opens the name form, which only the component's state can do.
- */
-function moreMenuItems(
-  props: ActionBarProps,
-  startRename: () => void,
-): MenuItem[] {
-  const { appearance } = props;
+/** The rarer actions behind the More menu, kept apart so each rule for when an action is off reads on its own. */
+function moreMenuItems(props: ActionBarProps): MenuItem[] {
+  const { appearance, source } = props;
   return [
     {
-      label: COPY.rename,
-      // Renaming the pristine built-in would only edit a draft nobody can save under that name.
-      disabled: props.busy || (!props.hasSaved && !props.dirty),
-      run: startRename,
-    },
-    { label: COPY.duplicate, disabled: props.busy, run: props.onDuplicate },
-    {
       label: COPY.remove,
-      disabled: props.busy || !props.hasSaved,
+      disabled:
+        props.busy ||
+        source.kind !== "custom" ||
+        !source.owned ||
+        source.active,
       run: props.onDelete,
     },
     {
       label: COPY.exportJson,
-      disabled: props.busy || !props.hasSaved,
+      disabled: props.busy || !props.valid,
       run: () => props.onExport("json"),
     },
     {
       label: COPY.exportCss,
-      disabled: props.busy || !props.hasSaved,
+      disabled: props.busy || !props.valid,
       run: () => props.onExport("css"),
     },
     {
@@ -96,34 +93,28 @@ function moreMenuItems(
 }
 
 /**
- * The one place to save and apply: `<name> · status` and Discard, Save, Apply,
- * and a menu for the rarer actions. Save and Apply on a theme that is not
- * saved yet ask for a name first, which is how Neutral becomes a new theme.
+ * The one place to save: `<name> · status`, then Discard, Overwrite (custom
+ * themes only), Save as new, Use theme, and a menu for the rarer actions.
  * The page keys this on the open theme so a half-filled name form cannot
  * outlive a theme switch.
  */
 export function ActionBar(props: ActionBarProps) {
-  const [naming, setNaming] = useState<Naming | null>(null);
-  const needsName = !props.hasSaved;
-  // The built-in's own name would make every new theme start as a duplicate of it.
-  const suggestedName = props.name === NEUTRAL_PRESET.name ? "" : props.name;
+  const [naming, setNaming] = useState(false);
   const disabled = primaryDisabled(props);
-  const finishNaming = (name: string) => {
-    const kind = naming;
-    setNaming(null);
-    if (kind === "rename") props.onRename(name);
-    else if (kind !== null) props.onSaveAs(name, { apply: kind === "apply" });
-  };
-  const menuItems = moreMenuItems(props, () => setNaming("rename"));
+  const suggestedName = `${props.name}${COPY.copySuffix}`.slice(
+    0,
+    MAX_NAME_LENGTH,
+  );
   return (
     <section className="tb-action-bar" aria-label={COPY.actionBarLabel}>
-      {naming !== null && (
+      {naming && (
         <NameForm
-          key={naming}
-          naming={naming}
-          initial={naming === "rename" ? props.name : suggestedName}
-          onSubmit={finishNaming}
-          onCancel={() => setNaming(null)}
+          initial={suggestedName}
+          onSubmit={(name) => {
+            setNaming(false);
+            props.onSaveAs(name);
+          }}
+          onCancel={() => setNaming(false)}
         />
       )}
       {props.notices}
@@ -142,25 +133,35 @@ export function ActionBar(props: ActionBarProps) {
           >
             {COPY.discardAction}
           </Button>
+          {props.source.kind === "custom" && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={disabled.overwrite}
+              onClick={props.onOverwrite}
+            >
+              {`${COPY.overwrite} ${props.name}`}
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"
-            disabled={disabled.save}
-            onClick={() => (needsName ? setNaming("save") : props.onSave())}
+            disabled={disabled.saveAs}
+            onClick={() => setNaming(true)}
           >
-            {COPY.save}
+            {COPY.saveAsNew}
           </Button>
           <Button
             type="button"
-            disabled={disabled.apply}
-            onClick={() => (needsName ? setNaming("apply") : props.onApply())}
+            disabled={disabled.use}
+            onClick={props.onUseTheme}
           >
-            {COPY.apply}
+            {COPY.useTheme}
           </Button>
-          <MoreMenu items={menuItems} />
+          <MoreMenu items={moreMenuItems(props)} />
         </div>
       </div>
-      <p className="tb-hint">{COPY.applyHint}</p>
+      <p className="tb-hint">{COPY.useHint}</p>
     </section>
   );
 }

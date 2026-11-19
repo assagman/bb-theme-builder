@@ -1,5 +1,6 @@
 import { generateCss } from "../theme/css.ts";
 import type { Mode, ThemeDraft } from "../theme/tokens.ts";
+import { buildCopyCss, previewSafeCss } from "../themes/theme-css.ts";
 
 const PREVIEW_CSS = `
 :root {
@@ -23,7 +24,7 @@ const PREVIEW_CSS = `
   --state-hover: color-mix(in oklab,var(--ink) 5.9%,transparent);
   --state-active: color-mix(in oklab,var(--ink) 11.8%,transparent);
 }
-:root.dark {
+.dark {
   --secondary: color-mix(in oklch,var(--ink) 13%,var(--canvas));
   --muted: color-mix(in oklch,var(--ink) 16%,var(--canvas));
   --border: color-mix(in oklch,var(--ink) 19.4%,var(--canvas));
@@ -115,6 +116,17 @@ const MARKUP = `
 const CSP =
   "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; img-src 'none'; font-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'";
 
-export function previewDocument(draft: ThemeDraft, mode: Mode): string {
-  return `<!doctype html><html lang="en" class="${mode}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Preview</title><style>${generateCss(draft)}${PREVIEW_CSS}</style></head><body>${MARKUP}</body></html>`;
+/**
+ * The preview page for a working copy. Order matters: the generated palette
+ * fills tokens the theme leaves out, bb's derived tokens come next, and the
+ * copy CSS (the theme's own CSS plus edits) comes last, as bb paints it.
+ * `css` is the source theme's CSS, null for built-in and plugin themes.
+ */
+export function previewDocument(
+  draft: ThemeDraft,
+  css: string | null,
+  mode: Mode,
+): string {
+  const copy = previewSafeCss(buildCopyCss(css, draft));
+  return `<!doctype html><html lang="en" class="${mode}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Preview</title><style>${generateCss(draft)}${PREVIEW_CSS}${copy}</style></head><body>${MARKUP}</body></html>`;
 }

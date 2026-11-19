@@ -1,11 +1,10 @@
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import { useCallback, useEffect, useState } from "react";
-import type { rpcContract } from "../presets/contract.ts";
-import { NEUTRAL_PRESET } from "../theme/defaults.ts";
-import { sameDraft, toDraft } from "../theme/schema.ts";
-import type { ThemeDraft, ThemePreset } from "../theme/tokens.ts";
+import { describeError } from "../shared/describe-error.ts";
+import { sameDraft } from "../theme/schema.ts";
+import type { ThemeDraft } from "../theme/tokens.ts";
+import type { rpcContract } from "../themes/contract.ts";
 import { COPY } from "./copy.ts";
-import { describeError } from "./describe-error.ts";
 import {
   clearStoredDraft,
   type DraftStorageError,
@@ -14,14 +13,21 @@ import {
   saveStoredDraft,
 } from "./draft-storage.ts";
 import { LOG_PREFIX } from "./log.ts";
-import { type Notice, readEditor, useEditorField } from "./store.ts";
+import { goneSource, sourceFromView } from "./source.ts";
+import {
+  INITIAL_SOURCE,
+  type Notice,
+  readEditor,
+  type Source,
+  useEditorField,
+} from "./store.ts";
 
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
 /**
  * `pending` until the stored draft was considered, `ready` afterwards, and
  * `failed` when it could not be read: then the stored entry must be kept.
  */
-type Phase = "pending" | "ready" | "failed";
+export type Phase = "pending" | "ready" | "failed";
 // Module-level like the editor store: a remounted page must not restore a second time over live edits.
 let hydration: Phase = "pending";
 // Storage failures repeat on every edit; one log line per page load is enough to diagnose.
@@ -29,13 +35,13 @@ let storageFailureLogged = false;
 
 type Restored = {
   draft: ThemeDraft;
-  saved: ThemePreset | null;
+  source: Source;
   notice: Notice;
 };
 
 /**
  * Decides what a stored draft becomes. Returns null when nothing should be
- * restored; throws when the base preset cannot be read, so the caller keeps
+ * restored; throws when the source theme cannot be read, so the caller keeps
  * the stored entry for a later attempt.
  */
 async function restoreFromStorage(
@@ -45,45 +51,40 @@ async function restoreFromStorage(
   const stored = loadStoredDraft();
   if (stored === null) return null;
   const startDraft = readEditor("draft");
-  const startSaved = readEditor("saved");
-  // Live edits already held by a remounted page are newer than anything stored.
-  if (startSaved !== null || !sameDraft(startDraft, NEUTRAL_PRESET))
+  const startSource = readEditor("source");
+  // Live edits or a theme opened by a remounted page are newer than anything stored.
+  if (
+    startSource !== INITIAL_SOURCE ||
+    !sameDraft(startDraft, INITIAL_SOURCE.loaded)
+  )
     return null;
-  const base =
-    stored.baseId === null
-      ? null
-      : await rpc.call("getPreset", { id: stored.baseId });
-  // The user may have started editing during the wait; their edits win over the stored copy.
-  if (readEditor("draft") !== startDraft || readEditor("saved") !== startSaved)
+  const view = await rpc.call("getTheme", { id: stored.sourceId });
+  // The user may have acted during the wait; their choice wins over the stored copy.
+  if (
+    readEditor("draft") !== startDraft ||
+    readEditor("source") !== startSource
+  )
     return null;
-  const baseDraft = base === null ? NEUTRAL_PRESET : toDraft(base);
-  if (sameDraft(stored.draft, baseDraft)) {
+  const fresh = sourceFromView(view);
+  // A file changed since keeps the hash the edits started from, so Overwrite reports a conflict instead of replacing the newer file.
+  const source =
+    fresh.kind === "gone"
+      ? goneSource(stored.sourceId, stored.baseline)
+      : fresh.hash === stored.sourceHash
+        ? fresh
+        : { ...fresh, hash: stored.sourceHash, loaded: stored.baseline };
+  if (sameDraft(stored.draft, source.loaded)) {
     onStale();
     return null;
   }
-  if (stored.baseId !== null && base === null)
-    // The original is gone, so the edits can only continue as a new theme.
-    return {
-      draft: stored.draft,
-      saved: null,
-      notice: {
-        kind: "restoredDeleted",
-        text: `${COPY.restoredDeleted} ${stored.draft.name}`,
-      },
-    };
-  // Keeping the revision the edits started from makes Save report a conflict if the base moved on, instead of overwriting it.
-  const saved =
-    base === null
-      ? null
-      : { ...base, revision: stored.baseRevision ?? base.revision };
-  return {
-    draft: stored.draft,
-    saved,
-    notice: {
-      kind: "restored",
-      text: `${COPY.restored} ${stored.draft.name}`,
-    },
-  };
+  const notice: Notice =
+    source.kind === "gone"
+      ? {
+          kind: "restoredDeleted",
+          text: `${COPY.restoredDeleted} ${source.label}`,
+        }
+      : { kind: "restored", text: `${COPY.restored} ${source.label}` };
+  return { draft: stored.draft, source, notice };
 }
 
 /**
@@ -93,9 +94,10 @@ async function restoreFromStorage(
 export function useDraftPersistence({ dirty }: { dirty: boolean }) {
   const rpc = useRpc<typeof rpcContract>();
   const [draft, setDraft] = useEditorField("draft");
-  const [saved, setSaved] = useEditorField("saved");
+  const [source, setSource] = useEditorField("source");
   const [, setMessage] = useEditorField("message");
   const [, setNotice] = useEditorField("notice");
+  const [, setHistory] = useEditorField("history");
   const [phase, setPhase] = useState<Phase>(hydration);
   const settle = useCallback((next: Phase) => {
     hydration = next;
@@ -126,9 +128,24 @@ export function useDraftPersistence({ dirty }: { dirty: boolean }) {
       (restored) => {
         if (!active) return;
         if (restored !== null) {
-          setSaved(restored.saved);
+          setSource(restored.source);
           setDraft(restored.draft);
           setNotice(restored.notice);
+          // The restored copy's Undo/Redo depend on its saved versions; without this they stay disabled until the next focus.
+          const open = restored.source;
+          if (open.kind === "custom")
+            void rpc.call("getThemeHistory", { id: open.id }).then(
+              (history) => {
+                if (active && readEditor("source") === open)
+                  setHistory(history);
+              },
+              (cause) =>
+                console.warn(`${LOG_PREFIX} history fetch failed`, {
+                  operation: "restoreHistory",
+                  id: open.id,
+                  cause: describeError(cause),
+                }),
+            );
         }
         settle("ready");
       },
@@ -146,7 +163,7 @@ export function useDraftPersistence({ dirty }: { dirty: boolean }) {
     return () => {
       active = false;
     };
-  }, [rpc, clearDraft, settle, setSaved, setDraft, setNotice]);
+  }, [rpc, clearDraft, settle, setSource, setDraft, setNotice, setHistory]);
 
   useEffect(() => {
     if (phase === "pending") return;
@@ -154,16 +171,17 @@ export function useDraftPersistence({ dirty }: { dirty: boolean }) {
       saveStoredDraft(
         {
           draft,
-          baseId: saved?.id ?? null,
-          baseRevision: saved?.revision ?? null,
+          sourceId: source.id,
+          sourceHash: source.hash,
+          baseline: source.loaded,
         },
         reportStorageFailure,
       );
     else if (phase === "ready") clearDraft();
-  }, [phase, dirty, draft, saved, reportStorageFailure, clearDraft]);
+  }, [phase, dirty, draft, source, reportStorageFailure, clearDraft]);
 
   // The debounce timer must not outlive the page, and closing inside its window must not lose the last edit.
   useEffect(() => flushStoredDraft, []);
 
-  return { clearDraft };
+  return { clearDraft, phase };
 }

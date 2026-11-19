@@ -38,63 +38,41 @@
 }
 
 /*
- * Theme list: compact one-line cards in a grid capped at about two rows with
- * its own scroll. Without the cap, a large collection pushes the tabs and
- * preview below the fold. 2 rows x 36px card + 8px gap + 4px for the focus
- * ring of the open card.
+ * Theme dropdown: one row with the label, the dropdown and Undo/Redo; it
+ * wraps on narrow widths. The cap keeps a long theme name from stretching the
+ * dropdown across a wide window.
  */
-.tb-list {
-  --tb-card-height: 36px;
-  --tb-list-gap: 8px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--tb-list-gap);
-  max-height: calc(var(--tb-card-height) * 2 + var(--tb-list-gap) + 4px);
-  overflow-y: auto;
-  list-style: none;
-  margin: 0;
-  padding: 2px;
-}
-.tb-card {
+.tb-picker-row {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.tb-picker-select {
+  flex: 1 1 220px;
+  max-width: 420px;
+}
+.tb-picker-history {
+  display: flex;
+  gap: 6px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.tb-picker .tb-hint {
+  margin-top: 6px;
+}
+/* The outside-change note keeps its Reload action on the same line, wrapping only when the window is narrow. */
+.tb-picker-changed {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  height: var(--tb-card-height);
-  padding: 0 10px;
-  text-align: left;
-  font-size: 13px;
-  color: var(--foreground);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
 }
-.tb-card:hover:not(:disabled) {
-  background: var(--state-hover, var(--border));
-}
-.tb-card:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-/* A heavier border, not only a color change, marks the open theme. */
-.tb-card[aria-current="true"] {
-  border-color: var(--foreground);
-  box-shadow: 0 0 0 1px var(--foreground);
-}
-.tb-card:focus-visible,
 .tb-tab:focus-visible,
 .tb-menu-item:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
-}
-.tb-card-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .tb-badge {
   flex: none;
@@ -104,23 +82,6 @@
   border-radius: 4px;
   color: var(--muted-foreground);
 }
-.tb-swatch {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  gap: 1px;
-}
-.tb-swatch-row {
-  display: flex;
-  gap: 1px;
-}
-.tb-swatch-row span {
-  width: 10px;
-  height: 7px;
-  border-radius: 1px;
-  box-shadow: inset 0 0 0 1px var(--border);
-}
-
 /*
  * Tabs and preview sit side by side. The 380px editor column fits a token row
  * (label, color well, hex field); the 300px floor keeps it usable when narrow.

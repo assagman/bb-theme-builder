@@ -7,50 +7,103 @@ representative fixture, not a bb session.
 
 ## Page layout
 
-The page has four parts. All of them work on one working theme.
+The page has four parts. All of them work on one working copy of a theme.
 
-- **Your themes** is a list of cards at the top. Each card shows a small
-  swatch strip for both modes and the theme name. **Neutral (built-in)** is
-  always first. The theme that bb uses now has an **Active** badge. Select a
-  card to open it. **New** starts again from Neutral.
-- **Three tabs** let you change the theme: **AI**, **Edit**, and
+- **Theme** is a dropdown at the top. It lists every bb theme in groups:
+  **Built-in**, **Your themes**, and **Plugin themes**. The theme that bb uses
+  now is marked **(in use)**. Pick a theme to open an editable copy of it.
+  **Undo** and **Redo** beside it step through the saved versions of the open
+  theme.
+- **Three tabs** let you change the copy: **AI**, **Edit**, and
   **Randomize**. They all change the same draft. Switch tabs at any time.
-- **Preview** shows the draft as a whole bb window: icon rail, sidebar,
+- **Preview** shows the copy as a whole bb window: icon rail, sidebar,
   thread with composer, and a side panel. Choose **Light** or **Dark** to see
   each mode.
-- **The action bar** is the one place to save and apply. It shows the theme
-  name and its state (**Unsaved changes**, **Saved**, or **Built-in theme**).
-  It has **Discard**, **Save**, **Apply**, and a **More actions** menu.
+- **The action bar** is the one place to save. It shows the theme name and its
+  state (**Unsaved changes**, **Saved**, **Built-in theme**, or **Plugin
+  theme**). It has **Discard**, **Overwrite**, **Save as new…**, **Use
+  theme**, and a **More actions** menu.
 
 ## Use
 
-1. Pick a way to build the theme.
+1. Pick a theme in the dropdown. The page opens on the theme bb uses now.
+2. Change the copy.
    - **AI**: choose a model, describe the theme in plain words, and select
      **Generate**. Then keep talking to the agent to tweak the result. See
      [AI tab](#ai-tab).
    - **Edit**: change colors and fonts by hand. See [Edit tab](#edit-tab).
    - **Randomize**: get a full theme with one click. See
      [Randomize tab](#randomize-tab).
-2. Check the result in **Preview**.
-3. Select **Save** to keep the theme. Select **Apply** to save it and use it
-   in all bb windows. A theme that is not saved yet asks for a name first.
-4. **More actions** has **Rename**, **Duplicate**, **Delete**,
-   **Export JSON**, **Export CSS**, and **Restore previous theme**.
+3. Check the result in **Preview**.
+4. Save the copy.
+   - **Overwrite** saves it over your own theme. It is there only for your
+     custom themes, not for built-in or plugin themes.
+   - **Save as new…** asks for a name and keeps the copy as a new theme. The
+     theme’s file name is made from the name: lowercase letters, digits, and
+     `-`. When the name is taken, the builder adds `-2`, `-3`, and so on. The
+     working copy then belongs to the new theme.
+5. Select **Use theme** to switch all bb windows to the saved theme.
+6. **More actions** has **Delete**, **Export JSON**, **Export CSS**, and
+   **Restore previous theme**.
 
-**Save** does not change appearance. **Apply** saves the valid draft and
-activates a new immutable revision. It applies to all bb windows. Each window
-keeps its light/dark preference, and the favicon selection stays.
-**Duplicate** makes an unsaved copy; save it to keep it. Selecting another
-theme or **New** asks before it discards unsaved edits.
+Picking another theme, **Undo**, or **Redo** asks before it discards unsaved
+edits. Saving never changes appearance by itself, except that an
+**Overwrite**, **Undo**, or **Redo** of the theme in use repaints bb at once.
+Each window keeps its light/dark preference, and the favicon selection stays.
+
+### Copies keep the theme’s own CSS
+
+A copy of your own theme keeps its CSS exactly as written. The builder reads
+the colors from its top-level `:root`, `.light`, and `.dark` rules, in source
+order. It understands `#rgb` and `#rrggbb` values; other forms keep the
+Neutral value in the editor. A save appends one block marked
+`/* theme-builder:edits */` with only the values you changed, per mode. A
+light edit never applies in dark mode, so a dark value the builder cannot read
+stays as it is. Each later save replaces that block and keeps any CSS you
+wrote after it, so a theme never has more than one. A marker that is not
+followed by the builder's own rules is treated as your CSS and kept. When
+other rules of a theme style parts of bb directly, the page says so: those
+parts may not follow your edits. A custom theme whose folder name the builder
+cannot use opens as a Neutral copy, and the page says so.
+
+bb does not expose the colors of built-in and plugin themes, so their copies
+start from Neutral, and the page says so. Save such a copy as a new theme.
+
+### Undo and redo
+
+**Overwrite**, **Undo**, and **Redo** keep up to five saved versions before
+the current one, per theme. **Undo** writes the previous saved version back to
+the theme file; **Redo** goes forward again. A new save after an undo drops
+the versions ahead of it. If the theme file was edited outside the builder,
+the builder first keeps that edit as a version, so an undo never loses it:
+**Undo** goes back to your last save and **Redo** returns the outside edit.
+When the page notices such an edit, it says so and offers **Reload theme**. The
+buttons are off, with a reason, for built-in and plugin themes and when there
+is nothing to step to.
+
+### Delete
+
+**Delete** removes only themes made in the builder: with **Save as new** or by
+the move of older saved themes. It never deletes the theme in use and asks
+first. The last version stays in the builder’s history.
+
+### Themes from older versions
+
+Older versions of the builder kept saved themes inside the plugin. On the first
+start, each of them becomes a bb theme under a file name made from its name.
+This happens once and does not change appearance. The old copies stay inside
+the plugin as a backup.
 
 ### Unsaved changes survive a reload
 
 This browser keeps your unsaved draft. After a reload, the page restores it and
 shows a notice such as “Restored unsaved changes to …”. The notice has a
 **Discard** button that drops the restored edits. If the original theme was
-deleted in another window, the edits come back as a new unsaved theme and the
-notice says so. If the browser cannot store the draft, the page tells you. Save
-the theme to keep it for good. Saved themes survive a server restart.
+deleted in another window, the edits come back with the notice that says so;
+save them as a new theme. If the theme file changed since the edits started,
+**Overwrite** refuses, so the newer file is never replaced silently. If the
+browser cannot store the draft, the page tells you. Save the theme to keep it
+for good. Saved themes survive a server restart.
 
 ### Edit tab
 
@@ -75,8 +128,8 @@ accent gives a new color direction.
 No model is needed. The roll runs in the page and sends nothing to a provider.
 **Back** and **Forward** walk through your rolls. **Back** can return to the
 colors you had before the first roll. The trail is kept when you change tabs.
-It is cleared when you open, create, duplicate, delete, or discard a theme,
-because the rolls then belong to a different theme. **Edit this** and **Refine
+It is cleared when you pick, save as new, undo, redo, delete, or discard a
+theme, because the rolls then belong to a different theme. **Edit this** and **Refine
 with AI** continue from the rolled theme.
 
 A roll replaces only the light and dark colors. The name and fonts stay.
@@ -95,8 +148,7 @@ you have stays in the draft. A reload keeps the open conversation.
 The provider must already be configured in bb. Normal provider usage charges
 and limits apply. Your model and reasoning selection is remembered in this
 browser. A reply replaces only the light and dark colors, never the name or
-fonts. Review **Preview** and the contrast badges, then Save or Apply
-explicitly.
+fonts. Review **Preview** and the contrast badges, then save explicitly.
 
 The public SDK has no general inference call. The AI tab uses one personal bb
 agent thread with the chosen model and `accept-edits` permissions and a
@@ -125,19 +177,21 @@ keys, and incomplete palettes are rejected. Contrast badges remain the review
 mechanism. No additional dependencies, provider credentials, or API-key
 settings are introduced by Theme Builder.
 
-### Apply, restore, and export
+### Use theme, restore, and export
 
-**Restore previous theme** (in **More actions**) reselects the palette
-immediately before the latest successful Apply. If appearance changed
-elsewhere, restore refuses and the page reads the current selection again, so
-you can review it and Apply. If a custom or plugin theme’s source files changed
-after Apply, Restore leaves appearance unchanged and offers the explicit
-**Use bb default theme** fallback.
+**Use theme** switches bb to the saved theme, so it is off while the copy has
+unsaved edits. **Restore previous theme** (in **More actions**) reselects the
+theme that was in use before the latest successful **Use theme**. An overwrite
+of the theme in use keeps Restore available. If appearance changed elsewhere,
+restore refuses and the page reads the current selection again, so you can
+review it and try again. If a custom or plugin theme’s source files changed
+after **Use theme**, Restore leaves appearance unchanged and offers the
+explicit **Use bb default theme** fallback.
 
-**Export JSON** and **Export CSS** download the saved revision, even with newer
-unsaved edits. Both need a saved theme. JSON contains schema version, name,
-palettes, and font keys; neither download includes server paths, IDs, or
-timestamps in its content.
+**Export JSON** downloads the draft as shown. **Export CSS** downloads exactly
+the CSS a save would write. JSON contains schema version, name, palettes, and
+font keys; neither download includes server paths or timestamps in its
+content.
 
 Hex text fields offer a keyboard alternative to native color pickers. All
 colors are opaque six-digit hex; fonts are fixed local/system stacks whose
@@ -152,7 +206,7 @@ terminal ANSI colors, CSS import, and plugin-package export are outside v1.
 
 ## Install and build
 
-Current browser verification uses bb **0.43.0** with public Plugin SDK
+Current browser verification uses bb **0.50.1** with public Plugin SDK
 **0.4.47**. The SDK pin and engine ranges come from the original bb 0.42.1
 scaffold. Use a disposable development server first. This repository has not
 been published to a marketplace.
@@ -188,43 +242,43 @@ The editor and browser journey introduce no additional runtime libraries.
 
 ## Recovery and retention
 
-A failed theme-file write leaves appearance unchanged. If saving succeeds but
-Apply fails, the editor says the theme was saved. If activation is uncertain,
-reload the page; persisted pending operations reconcile against the actual
-selected CSS and code-theme identity. Success requires selection readback.
+Every save writes the whole theme file at once: a new temporary file in the
+theme’s folder, synced, then renamed over `theme.css`, so bb never reads half a
+theme. **Overwrite** sends the hash of the file the page loaded. If the file
+changed since, the save is refused and the draft is kept; save it as a new
+theme or pick the theme again. If a save succeeds but bb does not confirm the
+repaint, the page says so.
 
-A missing or changed previous theme produces a separate **Use bb default
-theme** action in **More actions**. Existing custom-theme recovery records
-without a source fingerprint also require this explicit fallback. Built-in
-recovery records remain compatible. Restore never silently picks default or
-overwrites an already-observed external selection. A changed favicon is
-preserved after the page reads appearance again. For load/build failures,
-inspect `bb plugin list` and `bb plugin logs theme-builder`, correct the
-reported error, then use `bb plugin reload theme-builder`. If the page opens
-before plugin startup completes, reload the page once it is running. Normal bb theme
-settings remain available independently. Save completion and pending-operation
-locks survive compact-layout remounts, so a delayed save cannot create a second
-theme.
+If **Use theme** is uncertain, reload the page; persisted pending operations
+reconcile against the actual selected CSS and code-theme identity. Success
+requires selection readback. A missing or changed previous theme produces a
+separate **Use bb default theme** action in **More actions**. Existing
+custom-theme recovery records without a source fingerprint also require this
+explicit fallback. Built-in recovery records remain compatible. Restore never
+silently picks default or overwrites an already-observed external selection. A
+changed favicon is preserved after the page reads appearance again. For
+load/build failures, inspect `bb plugin list` and
+`bb plugin logs theme-builder`, correct the reported error, then use
+`bb plugin reload theme-builder`. If the page opens before plugin startup
+completes, reload the page once it is running. Normal bb theme settings remain
+available independently.
 
-Themes live independently in plugin KV: maximum 100 themes, 80-character
-names, 32 KB per theme, schema version 1. Saves/deletes serialize within the
-plugin and compare revisions; conflicts preserve the client’s draft. Teardown
-drains queued operations. No additional database or worker is created.
-
-Each Apply creates a unique directory under the **server’s catalog-reported
-theme directory**. Display names never enter paths. Existing paths and symlinks
-are refused; complete CSS is written before selection. Theme IDs stay within 64
-characters. Files are independent of the plugin manifest and survive disabling
-the builder. Deleting a theme retains generated artifacts and restore targets.
-No automatic pruning: disk use grows by one small CSS file and directory per
-Apply, including possible unselected artifacts after failures. Do not remove a
-selected or needed restore theme.
+Themes are ordinary bb custom themes in the **server’s catalog-reported theme
+directory**: one folder per theme with one `theme.css` of at most 256 KB.
+They survive disabling or removing the builder. The builder touches only
+folder names of letters, digits, `-`, and `_`, and refuses symlinks, a
+symlinked or non-directory theme root, and files over the size limit. Delete
+removes one `theme.css` and its then-empty folder, never recursively. Saved
+versions for undo, the list of themes the builder made, and the progress of
+the one-time move of older themes live in the plugin’s own SQLite database:
+at most six versions per theme. Writes run one at a time within the plugin.
+Teardown drains queued operations.
 
 `bb.sdk.theme.set({ themeId, faviconColor })` has **no atomic
 compare-and-swap**. Read-before-write detects visible changes, but another
 Settings/CLI operation can race between the check and selection. The plugin
 serializes its own operations; it cannot lock other appearance writers. Preview
-derivations and builtin restore availability are verified against 0.43.0 and
+derivations and builtin restore availability are verified against 0.50.1 and
 need rechecking on upgrades. As full-trust local code, filesystem checks cannot
 exclude a hostile OS process replacing ancestor directories during an operation.
 
@@ -267,14 +321,19 @@ theme directory. It creates test themes/artifacts, changes disposable
 appearance, and restores the initial selection on exit. Use a fresh artifact
 directory per run. Do not point it at production.
 
-The journey covers both modes, isolated edits without network requests,
-naming and saving a new theme, reload, the restored-changes notice and its
-Discard action, competing windows, immutable Apply, Restore, external changes,
+The journey covers the one-time move of older saved themes, the dropdown
+groups and hidden revision ids, a copy of a built-in theme, both modes,
+isolated edits without network requests, **Save as new**, reload, the
+restored-changes notice and its Discard action, a copy of a hand-written theme
+that keeps its CSS, **Overwrite** and its conflict between two windows, **Use
+theme**, the repaint after an overwrite of the theme in use, **Undo** and
+**Redo** including an outside edit, Restore, external changes,
 disable/enable, downloads, preview/host token parity, declined discard prompts,
-duplicate and delete, 200% zoom, compact layout, and keyboard tab navigation.
-Screenshots and a JSON report stay outside Git. To verify restart, apply a
-saved theme, stop only the disposable server, restart with the same data
-directory, reload the page, open the theme, verify the selected palette and
+delete, 200% zoom, compact layout, and keyboard tab navigation. It writes
+test themes into the disposable theme directory and test records into the
+disposable bb database. Screenshots and a JSON report stay outside Git. To
+verify restart, use a saved theme, stop only the disposable server, restart
+with the same data directory, reload the page, verify the selected palette and
 both modes, then Restore.
 
 No production instance, package installation, theme selection, or data was used
@@ -288,7 +347,7 @@ With the same disposable instance and `BB_THEME_TEST_*` environment, run
 starts no agent thread. It enters an accent and rolls three times. It checks
 that the primary color keeps the accent in both modes, that **Back** and
 **Forward** replay each palette, that a blank accent rolls freely, and that
-nothing is saved or applied. Then it reloads the page and checks that the draft
+nothing is saved or used. Then it reloads the page and checks that the draft
 and the restored-changes notice persist. The **AI** tab is not part of the smoke
 checks, because it needs a configured provider and incurs normal usage charges.
 Unit tests cover malformed output, strict RPC validation, request coalescing,

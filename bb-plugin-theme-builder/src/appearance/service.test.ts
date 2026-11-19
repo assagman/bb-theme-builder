@@ -1,19 +1,12 @@
 import assert from "node:assert/strict";
-import {
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
-import { createPresetStore } from "../presets/store.ts";
-import { NEUTRAL_PRESET } from "../theme/defaults.ts";
+import { createThemeFile } from "../themes/files.ts";
 import type { Appearance } from "./adapter.ts";
-import { appliedPresetId, createAppearanceService } from "./service.ts";
+import { createAppearanceService } from "./service.ts";
 
 const INITIAL: Appearance = {
   themeId: "default",
@@ -22,6 +15,9 @@ const INITIAL: Appearance = {
   resolvedCodeTheme: { dark: "pierre-dark", light: "pierre-light", files: {} },
 };
 const PREFIX = "theme-builder-service-";
+const THEME = "ocean";
+const THEME_CSS =
+  ":root, .light { --canvas: #f0f4f8; }\n.dark { --canvas: #101820; }\n";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), PREFIX));
@@ -29,7 +25,6 @@ async function fixture() {
   let failSet = false;
   let failRead = false;
   let loseReadback = false;
-  let invalidDirectory = false;
   const { bb, harness } = createFakePluginHost({
     sdk: {
       theme: {
@@ -41,7 +36,7 @@ async function fixture() {
           active: current,
           custom: readdirSync(root),
           plugins: [],
-          dir: invalidDirectory ? join(root, "blocked") : root,
+          dir: root,
         }),
         set: async (selection: unknown) => {
           if (failSet) throw new Error("Activation failed");
@@ -63,20 +58,12 @@ async function fixture() {
       },
     },
   });
-  const store = createPresetStore(bb.storage.kv);
-  const saved = await store.save({
-    id: null,
-    expectedRevision: null,
-    draft: NEUTRAL_PRESET,
-  });
-  assert.equal(saved.kind, "saved");
-  if (saved.kind !== "saved") throw new Error("Fixture could not save");
+  createThemeFile(root, THEME, THEME_CSS);
   return {
     bb,
-    store,
-    preset: saved.preset,
+    themeId: THEME,
     root,
-    service: createAppearanceService(bb, store),
+    service: createAppearanceService(bb),
     current: () => current,
     external: () => {
       current = { ...INITIAL, themeId: "nord" };
@@ -86,10 +73,6 @@ async function fixture() {
     },
     missingPrevious: () => {
       current = { ...INITIAL, themeId: "removed-theme" };
-    },
-    failFiles: () => {
-      writeFileSync(join(root, "blocked"), "not a directory");
-      invalidDirectory = true;
     },
     failActivation: () => {
       failSet = true;
@@ -108,40 +91,20 @@ async function fixture() {
   };
 }
 
-test("applies immutable CSS, preserves favicon, restores once, and refuses duplicate apply observations", async () => {
+test("selects an existing theme, preserves favicon, restores once, and refuses a stale observation", async () => {
   const f = await fixture();
   try {
     const observed = await f.service.get();
     const input = {
-      id: f.preset.id,
-      revision: f.preset.revision,
+      themeId: f.themeId,
       observedFingerprint: observed.fingerprint,
     };
-    const result = await f.service.apply(input);
+    const result = await f.service.select(input);
     assert.equal(result.kind, "applied");
     assert.equal(f.current().faviconColor, "purple");
-    assert.notEqual(f.current().themeId, "default");
-    assert.equal(
-      appliedPresetId(f.current().themeId, [f.preset.id]),
-      f.preset.id,
-    );
-    assert.equal(appliedPresetId("nord", [f.preset.id]), null);
-    const css = f.current().customCss;
-    await f.store.save({
-      id: f.preset.id,
-      expectedRevision: 1,
-      draft: {
-        ...NEUTRAL_PRESET,
-        light: { ...NEUTRAL_PRESET.light, canvas: "#123456" },
-      },
-    });
-    assert.equal(f.current().customCss, css);
-    assert.equal((await f.service.apply(input)).kind, "conflict");
-    assert.equal(
-      (await f.store.remove({ id: f.preset.id, expectedRevision: 2 })).kind,
-      "deleted",
-    );
-    assert.equal(f.current().customCss, css);
+    assert.equal(f.current().themeId, f.themeId);
+    assert.equal(f.current().customCss, THEME_CSS);
+    assert.equal((await f.service.select(input)).kind, "conflict");
     const active = await f.service.get();
     assert.equal(active.restoreAvailable, true);
     assert.ok(active.operationId);
@@ -164,9 +127,8 @@ test("applies immutable CSS, preserves favicon, restores once, and refuses dupli
 test("refuses restore after an external palette selection", async () => {
   const f = await fixture();
   try {
-    await f.service.apply({
-      id: f.preset.id,
-      revision: 1,
+    await f.service.select({
+      themeId: f.themeId,
       observedFingerprint: (await f.service.get()).fingerprint,
     });
     const active = await f.service.get();
@@ -190,9 +152,8 @@ test("refuses restore after an external palette selection", async () => {
 test("restore preserves a newer favicon after refreshing the observation", async () => {
   const f = await fixture();
   try {
-    await f.service.apply({
-      id: f.preset.id,
-      revision: 1,
+    await f.service.select({
+      themeId: f.themeId,
       observedFingerprint: (await f.service.get()).fingerprint,
     });
     f.changeFavicon();
@@ -217,9 +178,8 @@ test("restore preserves a newer favicon after refreshing the observation", async
 test("failed activation keeps the prior restore record", async () => {
   const f = await fixture();
   try {
-    await f.service.apply({
-      id: f.preset.id,
-      revision: 1,
+    await f.service.select({
+      themeId: f.themeId,
       observedFingerprint: (await f.service.get()).fingerprint,
     });
     const active = await f.service.get();
@@ -227,9 +187,8 @@ test("failed activation keeps the prior restore record", async () => {
     f.failActivation();
     assert.equal(
       (
-        await f.service.apply({
-          id: f.preset.id,
-          revision: 1,
+        await f.service.select({
+          themeId: "default",
           observedFingerprint: active.fingerprint,
         })
       ).kind,
@@ -245,13 +204,12 @@ test("serializes competing apply requests and rejects a duplicate restore", asyn
   const f = await fixture();
   try {
     const input = {
-      id: f.preset.id,
-      revision: 1,
+      themeId: f.themeId,
       observedFingerprint: (await f.service.get()).fingerprint,
     };
     const results = await Promise.all([
-      f.service.apply(input),
-      f.service.apply(input),
+      f.service.select(input),
+      f.service.select(input),
     ]);
     assert.deepEqual(results.map((result) => result.kind).sort(), [
       "applied",
@@ -270,16 +228,14 @@ test("serializes competing apply requests and rejects a duplicate restore", asyn
   }
 });
 
-test("a failed file write cannot change appearance or create a restore record", async () => {
+test("a theme bb does not list cannot change appearance or create a restore record", async () => {
   const f = await fixture();
   try {
-    f.failFiles();
-    const result = await f.service.apply({
-      id: f.preset.id,
-      revision: 1,
+    const result = await f.service.select({
+      themeId: "absent-theme",
       observedFingerprint: (await f.service.get()).fingerprint,
     });
-    assert.equal(result.kind, "failed");
+    assert.equal(result.kind, "missing");
     assert.deepEqual(f.current(), INITIAL);
     assert.equal((await f.service.get()).operationId, null);
   } finally {
@@ -293,9 +249,8 @@ test("a missing previous theme requires an explicit default fallback", async () 
     f.missingPrevious();
     assert.equal(
       (
-        await f.service.apply({
-          id: f.preset.id,
-          revision: 1,
+        await f.service.select({
+          themeId: f.themeId,
           observedFingerprint: (await f.service.get()).fingerprint,
         })
       ).kind,
@@ -322,9 +277,8 @@ test("a missing previous theme requires an explicit default fallback", async () 
 test("reconciles a restore whose activation succeeded before readback was lost", async () => {
   const f = await fixture();
   try {
-    await f.service.apply({
-      id: f.preset.id,
-      revision: 1,
+    await f.service.select({
+      themeId: f.themeId,
       observedFingerprint: (await f.service.get()).fingerprint,
     });
     const active = await f.service.get();
@@ -340,7 +294,7 @@ test("reconciles a restore whose activation succeeded before readback was lost",
       "failed",
     );
     f.recoverReads();
-    const recovered = await createAppearanceService(f.bb, f.store).get();
+    const recovered = await createAppearanceService(f.bb).get();
     assert.equal(recovered.themeId, "default");
     assert.equal(recovered.restoreAvailable, false);
     assert.equal(recovered.operationId, null);
@@ -355,14 +309,13 @@ test("reconciles a pending apply after losing its readback and recreating the se
     const observed = await f.service.get();
     f.loseReadback();
     await f.service
-      .apply({
-        id: f.preset.id,
-        revision: 1,
+      .select({
+        themeId: f.themeId,
         observedFingerprint: observed.fingerprint,
       })
       .catch(() => undefined);
     f.recoverReads();
-    const recovered = await createAppearanceService(f.bb, f.store).get();
+    const recovered = await createAppearanceService(f.bb).get();
     assert.equal(recovered.themeId, f.current().themeId);
     assert.equal(recovered.restoreAvailable, true);
     assert.ok(recovered.operationId);

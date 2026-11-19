@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { writeThemeRevision } from "./files.ts";
+import { createThemeFile } from "./files.ts";
 
 const FIXTURE = {
   prefix: "theme-builder-files-",
@@ -12,15 +12,15 @@ const FIXTURE = {
   outside: "outside",
 };
 
-test("writes a complete revision and refuses to overwrite it", () => {
+test("creates a complete theme and refuses to overwrite it", () => {
   const root = mkdtempSync(join(tmpdir(), FIXTURE.prefix));
   try {
-    writeThemeRevision(root, FIXTURE.id, FIXTURE.css);
+    createThemeFile(root, FIXTURE.id, FIXTURE.css);
     assert.equal(
       readFileSync(join(root, FIXTURE.id, "theme.css"), "utf8"),
       FIXTURE.css,
     );
-    assert.throws(() => writeThemeRevision(root, FIXTURE.id, FIXTURE.css));
+    assert.throws(() => createThemeFile(root, FIXTURE.id, FIXTURE.css));
     assert.equal(
       readFileSync(join(root, FIXTURE.id, "theme.css"), "utf8"),
       FIXTURE.css,
@@ -30,13 +30,13 @@ test("writes a complete revision and refuses to overwrite it", () => {
   }
 });
 
-test("rejects traversal and symlinked revision directories", () => {
+test("rejects traversal and symlinked theme directories", () => {
   const root = mkdtempSync(join(tmpdir(), FIXTURE.prefix));
   const outside = mkdtempSync(join(tmpdir(), FIXTURE.outside));
   try {
-    assert.throws(() => writeThemeRevision(root, "../escape", FIXTURE.css));
+    assert.throws(() => createThemeFile(root, "../escape", FIXTURE.css));
     symlinkSync(outside, join(root, FIXTURE.id));
-    assert.throws(() => writeThemeRevision(root, FIXTURE.id, FIXTURE.css));
+    assert.throws(() => createThemeFile(root, FIXTURE.id, FIXTURE.css));
     assert.throws(() => readFileSync(join(outside, "theme.css")));
   } finally {
     rmSync(root, { recursive: true });
@@ -49,7 +49,7 @@ test("rejects a symlinked theme root", () => {
   const link = join(root, "linked");
   try {
     symlinkSync(root, link);
-    assert.throws(() => writeThemeRevision(link, FIXTURE.id, FIXTURE.css));
+    assert.throws(() => createThemeFile(link, FIXTURE.id, FIXTURE.css));
   } finally {
     rmSync(root, { recursive: true });
   }

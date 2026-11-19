@@ -5,8 +5,8 @@ import {
   loadRememberedSelection,
   rememberSelection,
 } from "../generation/selection-storage.ts";
-import type { rpcContract } from "../presets/contract.ts";
-import { describeError } from "./describe-error.ts";
+import { describeError } from "../shared/describe-error.ts";
+import type { rpcContract } from "../themes/contract.ts";
 import { LOG_PREFIX } from "./log.ts";
 
 /**

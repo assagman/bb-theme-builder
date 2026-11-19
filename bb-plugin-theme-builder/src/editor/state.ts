@@ -1,94 +1,128 @@
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import { useEffect } from "react";
-import { appliedPresetId } from "../appearance/operations.ts";
-import type { rpcContract } from "../presets/contract.ts";
-import { NEUTRAL_PRESET } from "../theme/defaults.ts";
-import { sameDraft, toDraft } from "../theme/schema.ts";
-import { swatchOf } from "../theme/swatch.ts";
-import {
-  MAX_NAME_LENGTH,
-  type ThemeDraft,
-  type ThemePreset,
-} from "../theme/tokens.ts";
+import { describeError } from "../shared/describe-error.ts";
+import { sameDraft } from "../theme/schema.ts";
+import type {
+  rpcContract,
+  SaveOutcome,
+  ThemeView,
+} from "../themes/contract.ts";
+import { slugify } from "../themes/ids.ts";
+import { buildCopyCss } from "../themes/theme-css.ts";
 import { COPY } from "./copy.ts";
-import { describeError } from "./describe-error.ts";
 import { useDraftPersistence } from "./draft-persistence.ts";
 import { LOG_PREFIX } from "./log.ts";
-import { useEditorField } from "./store.ts";
+import { sourceFromView, unaskableView } from "./source.ts";
+import {
+  INITIAL_SOURCE,
+  readEditor,
+  type Source,
+  useEditorField,
+} from "./store.ts";
 
 export { TABS, type Tab } from "./store.ts";
 
-/** Formats the export RPC returns, shared with the menu that asks for them. */
+/** Formats the page can download, shared with the menu that asks for them. */
 export type ExportFormat = "json" | "css";
 const DOWNLOAD_CLEANUP_DELAY_MS = 1000;
+const JSON_INDENT = 2;
+const FOCUS_EVENT = "focus";
 const pending = { current: false };
-const PRESET_LIMIT_MESSAGE =
-  "Theme limit reached. Delete a saved theme before creating another.";
-const MISSING_MESSAGE =
-  "This theme was deleted in another window. Duplicate your changes to keep them.";
+type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
+
+/**
+ * Keeps the dropdown, the appearance and the open theme's history current:
+ * read on mount and again whenever the page regains focus, because themes
+ * are files other windows and tools can change. The history reply carries
+ * the file's hash now, so the page notices an outside change before an
+ * Overwrite conflict would. Replies after unmount, or (for history) after
+ * another theme was opened, are dropped so they never describe the wrong one.
+ */
+function useLiveCatalog(rpc: Rpc) {
+  const [, setCatalog] = useEditorField("catalog");
+  const [, setAppearance] = useEditorField("appearance");
+  const [, setHistory] = useEditorField("history");
+  const [, setError] = useEditorField("error");
+  useEffect(() => {
+    let active = true;
+    const deliver = <T>(request: Promise<T>, apply: (value: T) => void) =>
+      void request.then(
+        (value) => {
+          if (active) apply(value);
+        },
+        (cause) => {
+          if (active) setError(describeError(cause));
+        },
+      );
+    const load = () => {
+      deliver(rpc.call("listThemes", {}), setCatalog);
+      deliver(rpc.call("getAppearance", {}), setAppearance);
+      const open = readEditor("source");
+      if (open.kind === "custom")
+        deliver(rpc.call("getThemeHistory", { id: open.id }), (value) => {
+          if (readEditor("source") === open) setHistory(value);
+        });
+    };
+    load();
+    window.addEventListener(FOCUS_EVENT, load);
+    return () => {
+      active = false;
+      window.removeEventListener(FOCUS_EVENT, load);
+    };
+  }, [rpc, setCatalog, setAppearance, setHistory, setError]);
+}
+
+/**
+ * The page's one working copy of a bb theme and every action on it. Opening
+ * a theme copies it into the editor; Overwrite and Save as new are the only
+ * ways the copy reaches disk.
+ */
 export function useBuilderState() {
   const rpc = useRpc<typeof rpcContract>();
   const [tab, setTab] = useEditorField("tab");
   const [mode, setMode] = useEditorField("mode");
   const [draft, setDraft] = useEditorField("draft");
-  const [saved, setSaved] = useEditorField("saved");
-  const [presets, setPresets] = useEditorField("presets");
+  const [source, setSource] = useEditorField("source");
+  const [catalog, setCatalog] = useEditorField("catalog");
+  const [history, setHistory] = useEditorField("history");
   const [busy, setBusy] = useEditorField("busy");
   const [notice, setNotice] = useEditorField("notice");
   const [message, setMessage] = useEditorField("message");
   const [error, setError] = useEditorField("error");
   const [appearance, setAppearance] = useEditorField("appearance");
   const [missingRestore, setMissingRestore] = useEditorField("missingRestore");
-  const dirty = !sameDraft(
-    draft,
-    saved === null ? NEUTRAL_PRESET : toDraft(saved),
-  );
-  const { clearDraft } = useDraftPersistence({ dirty });
+  const dirty = !sameDraft(draft, source.loaded);
+  const { clearDraft, phase } = useDraftPersistence({ dirty });
+  useLiveCatalog(rpc);
 
-  async function refreshList() {
-    setPresets(await rpc.call("listPresets", {}));
+  async function refreshCatalog() {
+    const next = await rpc.call("listThemes", {});
+    setCatalog(next);
+    return next;
   }
-  async function refreshAppearance() {
-    setAppearance(await rpc.call("getAppearance", {}));
+  async function refreshHistory(next: Source) {
+    setHistory(
+      next.kind === "custom"
+        ? await rpc.call("getThemeHistory", { id: next.id })
+        : null,
+    );
   }
   /**
-   * Runs after every apply/restore attempt, even a failed one: a conflict
-   * means the fingerprint is stale, and without a fresh one every retry would
-   * conflict again. A failed refresh is logged, not thrown, so it cannot hide
-   * the outcome of the attempt itself.
+   * Runs after every switch or save, even a failed one: a conflict means the
+   * fingerprint is stale, and without a fresh one every retry would conflict.
+   * A failure is logged, not thrown, so it cannot hide the attempt's outcome.
    */
   async function refreshAfterAttempt(operation: string) {
     try {
-      await refreshAppearance();
+      setAppearance(await rpc.call("getAppearance", {}));
+      await refreshCatalog();
     } catch (cause) {
-      console.warn(`${LOG_PREFIX} appearance refresh failed`, {
+      console.warn(`${LOG_PREFIX} refresh failed`, {
         operation,
         cause: describeError(cause),
       });
     }
   }
-  useEffect(() => {
-    let active = true;
-    void rpc.call("listPresets", {}).then(
-      (values) => {
-        if (active) setPresets(values);
-      },
-      (cause) => {
-        if (active) setError(describeError(cause));
-      },
-    );
-    void rpc.call("getAppearance", {}).then(
-      (value) => {
-        if (active) setAppearance(value);
-      },
-      (cause) => {
-        if (active) setError(describeError(cause));
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [rpc]);
 
   async function run(action: () => Promise<void>) {
     if (pending.current) return;
@@ -107,164 +141,164 @@ export function useBuilderState() {
     }
   }
 
-  /** `target` lets the page name a brand-new theme in the same step as saving it, before the draft state has caught up. */
-  async function saveDraft(target: ThemeDraft = draft): Promise<ThemePreset> {
-    const result = await rpc.call("savePreset", {
-      id: saved?.id ?? null,
-      expectedRevision: saved?.revision ?? null,
-      draft: target,
-    });
-    if (result.kind !== "saved")
-      throw new Error(
-        result.kind === "limit" ? PRESET_LIMIT_MESSAGE : COPY.conflict,
-      );
-    setSaved(result.preset);
-    setDraft(toDraft(result.preset));
-    const { id, name, revision } = result.preset;
-    setPresets((values) => [
-      ...values.filter((value) => value.id !== id),
-      { id, name, revision, swatch: swatchOf(result.preset) },
-    ]);
+  /** Makes a theme as the server has it the working copy, dropping any stored draft of the previous one. */
+  function adopt(view: ThemeView): Source {
+    const next = sourceFromView(view);
+    setSource(next);
+    setDraft(structuredClone(next.loaded));
     clearDraft();
-    setMessage(COPY.saveSuccess);
-    return result.preset;
+    return next;
+  }
+  async function open(id: string) {
+    const next = adopt(
+      unaskableView(id) ?? (await rpc.call("getTheme", { id })),
+    );
+    await refreshHistory(next);
   }
 
-  /** Returns false when the user declined the discard prompt, so the page can keep state tied to the unchanged theme. */
+  // With no restored draft and nothing picked yet, the page starts on the theme bb is using.
+  const activeId = catalog?.activeId;
+  useEffect(() => {
+    if (
+      phase !== "ready" ||
+      activeId === undefined ||
+      readEditor("source") !== INITIAL_SOURCE ||
+      !sameDraft(readEditor("draft"), INITIAL_SOURCE.loaded)
+    )
+      return;
+    void run(() => open(activeId));
+  }, [phase, activeId]);
+
+  /** Shared ending of Overwrite, Save as new, Undo and Redo: the file on disk becomes the working copy. */
+  async function afterSave(outcome: SaveOutcome, success: string) {
+    try {
+      if (outcome.kind !== "saved") throw new Error(outcome.message);
+      const next = adopt(outcome.theme);
+      setMessage(
+        outcome.repaint === "unconfirmed"
+          ? `${success} ${COPY.repaintUnconfirmed}`
+          : success,
+      );
+      await refreshHistory(next);
+    } finally {
+      await refreshAfterAttempt("save");
+    }
+  }
+
+  /** Returns false when the user declined the discard prompt, so the page keeps state tied to the unchanged theme. */
   function select(id: string): boolean {
     if (dirty && !window.confirm(COPY.discard)) return false;
-    void run(async () => {
-      if (id === "") {
-        setSaved(null);
-        setDraft(structuredClone(NEUTRAL_PRESET));
-      } else {
-        const preset = await rpc.call("getPreset", { id });
-        if (preset === null) throw new Error(MISSING_MESSAGE);
-        setSaved(preset);
-        setDraft(toDraft(preset));
-      }
-      await refreshList();
-    });
+    void run(() => open(id));
     return true;
   }
 
-  /** Throws the unsaved edits away, back to the saved preset or the neutral starter. */
+  /** Throws the unsaved edits away, back to the theme as loaded. */
   function discard() {
-    setDraft(saved === null ? structuredClone(NEUTRAL_PRESET) : toDraft(saved));
+    setDraft(structuredClone(source.loaded));
     clearDraft();
     setError(null);
     setMessage(null);
     setNotice(null);
   }
 
-  function rename(name: string) {
-    setDraft((value) => ({ ...value, name }));
+  function overwrite() {
+    const { id, hash } = source;
+    if (source.kind !== "custom" || hash === null) return;
+    const target = draft;
+    void run(async () =>
+      afterSave(
+        await rpc.call("overwriteTheme", {
+          id,
+          expectedHash: hash,
+          draft: target,
+        }),
+        COPY.saveSuccess,
+      ),
+    );
   }
 
-  /** Starts from the neutral starter as an unsaved theme; asking about unsaved edits is the page's job. */
-  function newTheme() {
-    setSaved(null);
-    setDraft(structuredClone(NEUTRAL_PRESET));
-    clearDraft();
-    setError(null);
-    setMessage(null);
-    setNotice(null);
+  function saveAs(name: string) {
+    const sourceId = source.kind === "custom" ? source.id : null;
+    const target = draft;
+    void run(async () =>
+      afterSave(
+        await rpc.call("saveThemeAs", { name, sourceId, draft: target }),
+        COPY.saveSuccess,
+      ),
+    );
   }
 
-  function duplicate() {
-    setDraft({
-      ...structuredClone(draft),
-      name:
-        draft.name.slice(0, MAX_NAME_LENGTH - COPY.copySuffix.length) +
-        COPY.copySuffix,
+  /** Returns false when nothing moved because the discard prompt was declined, so the page keeps the roll trail. */
+  function step(direction: "undo" | "redo"): boolean {
+    if (source.kind !== "custom") return false;
+    if (dirty && !window.confirm(COPY.discard)) return false;
+    const { id } = source;
+    const undo = direction === "undo";
+    void run(async () =>
+      afterSave(
+        await rpc.call(undo ? "undoTheme" : "redoTheme", { id }),
+        undo ? COPY.undone : COPY.redone,
+      ),
+    );
+    return true;
+  }
+
+  function useTheme() {
+    if (appearance === null) return;
+    const observedFingerprint = appearance.fingerprint;
+    const themeId = source.id;
+    void run(async () => {
+      try {
+        const result = await rpc.call("useTheme", {
+          themeId,
+          observedFingerprint,
+        });
+        if (result.kind !== "applied")
+          throw new Error(
+            "message" in result ? result.message : COPY.unconfirmed,
+          );
+        setMessage(COPY.useSuccess);
+        setMissingRestore(false);
+      } finally {
+        await refreshAfterAttempt("use");
+      }
     });
-    setSaved(null);
-    setError(null);
-    setMessage(null);
-    setNotice(null);
   }
 
   /** Returns false when nothing was deleted because the prompt was declined, so the page keeps the roll trail. */
   function remove(): boolean {
     if (
-      saved === null ||
+      source.kind !== "custom" ||
       !window.confirm(dirty ? COPY.confirmDeleteDirty : COPY.confirmDelete)
     )
       return false;
+    const { id } = source;
     void run(async () => {
-      const result = await rpc.call("deletePreset", {
-        id: saved.id,
-        expectedRevision: saved.revision,
-      });
-      if (result.kind === "conflict") throw new Error(COPY.conflict);
-      setSaved(null);
-      setDraft(structuredClone(NEUTRAL_PRESET));
+      const result = await rpc.call("deleteTheme", { id });
+      if (result.kind !== "deleted") throw new Error(result.message);
+      // The deleted theme was never the active one, so bb's current theme is always there to fall back to.
+      const next = await refreshCatalog();
+      await open(next.activeId);
       setMessage(COPY.deleted);
-      await refreshList();
     });
     return true;
   }
 
+  /** Downloads exactly what Save would write, so an export can be dropped into another bb's theme folder. */
   function download(format: ExportFormat) {
-    if (saved === null) return;
-    void run(async () => {
-      const result = await rpc.call("exportPreset", {
-        id: saved.id,
-        revision: saved.revision,
-      });
-      if (result.kind === "conflict") throw new Error(COPY.conflict);
-      const blob = new Blob([result[format]], {
-        type: format === "json" ? COPY.downloadTypeJson : COPY.downloadTypeCss,
-      });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${result.baseName}.${format}`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_CLEANUP_DELAY_MS);
+    const body =
+      format === "json"
+        ? `${JSON.stringify(draft, null, JSON_INDENT)}\n`
+        : buildCopyCss(source.css, draft);
+    const blob = new Blob([body], {
+      type: format === "json" ? COPY.downloadTypeJson : COPY.downloadTypeCss,
     });
-  }
-
-  async function saveAndApply(target: ThemeDraft, observed: string) {
-    const preset = await saveDraft(target);
-    try {
-      const result = await rpc.call("applyPreset", {
-        id: preset.id,
-        revision: preset.revision,
-        observedFingerprint: observed,
-      });
-      if (result.kind !== "applied")
-        throw new Error(
-          "message" in result ? result.message : COPY.unconfirmed,
-        );
-      setMessage(COPY.applySuccess);
-      setMissingRestore(false);
-    } catch (cause) {
-      setMessage(null);
-      throw new Error(COPY.savedApplyFailed + describeError(cause));
-    } finally {
-      await refreshAfterAttempt("apply");
-    }
-  }
-
-  function apply() {
-    if (appearance === null) return;
-    const observed = appearance.fingerprint;
-    void run(() => saveAndApply(draft, observed));
-  }
-
-  /** Names a not-yet-saved theme and saves it (and applies it when asked) in one step, so the page needs no separate rename-then-save. */
-  function saveAs(name: string, options: { apply: boolean }) {
-    const target = { ...draft, name };
-    if (!options.apply) {
-      void run(async () => {
-        await saveDraft(target);
-      });
-      return;
-    }
-    if (appearance === null) return;
-    const observed = appearance.fingerprint;
-    void run(() => saveAndApply(target, observed));
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${slugify(source.label)}.${format}`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_CLEANUP_DELAY_MS);
   }
 
   function restore(fallbackToDefault = false) {
@@ -300,35 +334,27 @@ export function useBuilderState() {
     setTab,
     notice,
     discard,
-    rename,
-    newTheme,
-    appliedPresetId: appliedPresetId(
-      appearance?.themeId ?? "",
-      presets.map((preset) => preset.id),
-    ),
     mode,
     setMode,
     draft,
     setDraft,
-    saved,
-    presets,
+    source,
+    catalog,
+    history,
     dirty,
     busy,
     message,
     error,
     select,
-    duplicate,
+    overwrite,
+    saveAs,
+    undo: () => step("undo"),
+    redo: () => step("redo"),
+    useTheme,
     remove,
     download,
     appearance,
     missingRestore,
-    apply,
     restore,
-    saveAs,
-    save: () => {
-      void run(async () => {
-        await saveDraft();
-      });
-    },
   };
 }

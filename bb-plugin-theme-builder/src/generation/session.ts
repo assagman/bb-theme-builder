@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { BbPluginApi, PluginKvStorage } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { createSerialExecutor } from "../presets/serial.ts";
+import { createSerialExecutor } from "../shared/serial.ts";
 import { idSchema, samePalette } from "../theme/schema.ts";
 import { upgradeSessionPalettes } from "../theme/sidebar.ts";
 import {

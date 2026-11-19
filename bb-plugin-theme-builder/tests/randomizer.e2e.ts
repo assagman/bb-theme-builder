@@ -20,8 +20,7 @@ const PREVIEW_TIMEOUT_MS = 10000;
 const PREVIEW_POLL_MS = 50;
 const PANEL = "[role=tabpanel]";
 const ACCENT_SELECTOR = `${PANEL} input[placeholder=${JSON.stringify(COPY.accentPlaceholder)}]`;
-const NAME_INPUT = "#tb-name-input";
-const NAME = "Randomizer browser journey";
+const ACTION_NAME = ".tb-action-name";
 const UI_FONT = "humanist";
 const LOCAL_HOSTS = ["127.0.0.1", "localhost", "[::1]"];
 
@@ -61,6 +60,10 @@ const preview = () =>
 const evidence: Record<string, unknown> = {};
 const failures: unknown[] = [];
 const roll = () => page.click(COPY.randomize, PANEL);
+const actionName = () =>
+  page.evaluate<string>(
+    `document.querySelector(${JSON.stringify(ACTION_NAME)}).textContent`,
+  );
 const lightCanvas = () =>
   page.evaluate<string>("document.querySelector('#light-canvas').value");
 
@@ -87,16 +90,14 @@ async function rollAndExpectChange() {
 }
 
 try {
-  // Fonts and name are the user's own, so a roll must leave them alone.
+  // Fonts and the open theme are the user's own, so a roll must leave them alone.
   await page.tab(COPY.tabLabels.edit);
+  const name = await actionName();
   await page.evaluate(
     `(() => { const select = document.querySelector('section[aria-label="Typography"] select'); select.value = ${JSON.stringify(UI_FONT)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`,
   );
-  await page.menu(COPY.moreActions, COPY.rename);
-  await page.fill(NAME_INPUT, NAME);
-  await page.click(COPY.renameConfirm);
   const appearance = await rpc("getAppearance");
-  const savedBefore = await rpc("listPresets");
+  const savedBefore = await rpc("listThemes");
   await page.tab(COPY.tabLabels.randomize);
   await page.fill(ACCENT_SELECTOR, INVALID_ACCENT);
   await page.status(COPY.accentInvalid);
@@ -143,9 +144,9 @@ try {
   await page.fill(ACCENT_SELECTOR, "");
   const free = await rollAndExpectChange();
   evidence.freeAccent = true;
-  // Rolls only edit the draft; nothing may be saved or applied implicitly.
+  // Rolls only edit the draft; nothing may be saved or used implicitly.
   assert.deepEqual(await rpc("getAppearance"), appearance);
-  assert.deepEqual(await rpc("listPresets"), savedBefore);
+  assert.deepEqual(await rpc("listThemes"), savedBefore);
   // The draft must outlive a reload, with the notice that says so.
   await page.tab(COPY.tabLabels.edit);
   const canvas = await lightCanvas();
@@ -153,7 +154,7 @@ try {
     `JSON.parse(localStorage.getItem(${JSON.stringify(DRAFT_STORAGE_KEY)}) ?? 'null')?.draft.light.canvas === ${JSON.stringify(canvas)}`,
   );
   await page.reload();
-  await page.status(`${COPY.restored} ${NAME}`);
+  await page.status(`${COPY.restored} ${name}`);
   await page.tab(COPY.tabLabels.edit);
   assert.equal(await lightCanvas(), canvas);
   assert.equal(
@@ -162,18 +163,13 @@ try {
     ),
     UI_FONT,
   );
-  assert.equal(
-    await page.evaluate(
-      "document.querySelector('.tb-action-name').textContent",
-    ),
-    NAME,
-  );
+  assert.equal(await actionName(), name);
   await page.wait(
     `document.querySelector('iframe').srcdoc === ${JSON.stringify(free)}`,
   );
   await page.status(COPY.dirty);
   evidence.draftReload =
-    "rolled palette, name, and fonts restored with the notice; nothing saved or applied";
+    "rolled palette, open theme, and fonts restored with the notice; nothing saved or used";
   writeFileSync(
     join(CONFIG.artifacts, "evidence.json"),
     JSON.stringify(evidence, null, 2),

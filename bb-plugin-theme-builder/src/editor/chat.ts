@@ -10,10 +10,10 @@ import {
   PING_INTERVAL_MS,
   POLL_INTERVAL_MS,
 } from "../generation/contract.ts";
-import type { rpcContract } from "../presets/contract.ts";
+import { describeError } from "../shared/describe-error.ts";
 import { paletteOf, samePalette } from "../theme/schema.ts";
 import type { ThemeDraft } from "../theme/tokens.ts";
-import { describeError } from "./describe-error.ts";
+import type { rpcContract } from "../themes/contract.ts";
 import { LOG_PREFIX } from "./log.ts";
 import { useEditorField } from "./store.ts";
 

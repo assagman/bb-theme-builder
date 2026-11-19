@@ -11,7 +11,10 @@ import {
 const SELECTORS = { light: ":root, .light", dark: ".dark" };
 const NEWLINE = "\n";
 // bb paints hovered sidebar rows' text with this token; it follows Sidebar text so a row keeps its color on hover.
-const SIDEBAR_HOVER_TEXT = "--sidebar-accent-foreground";
+export const SIDEBAR_HOVER_TEXT = "--sidebar-accent-foreground";
+// Exported so the theme reader and the edits writer name bb's font variables exactly as the generator does.
+export const FONT_SANS = "--font-sans";
+export const FONT_MONO = "--font-mono";
 
 export function generateCss(input: ThemeDraft): string {
   const draft = draftSchema.parse(input);
@@ -24,8 +27,8 @@ export function generateCss(input: ThemeDraft): string {
         `  ${SIDEBAR_HOVER_TEXT}: ${draft[mode].sidebarForeground};`,
       ];
       const fonts = [
-        `  --font-sans: ${UI_FONTS[draft.uiFont].stack};`,
-        `  --font-mono: ${CODE_FONTS[draft.codeFont].stack};`,
+        `  ${FONT_SANS}: ${UI_FONTS[draft.uiFont].stack};`,
+        `  ${FONT_MONO}: ${CODE_FONTS[draft.codeFont].stack};`,
       ];
       return [
         `${SELECTORS[mode]} {`,

@@ -1,29 +1,45 @@
 import { z } from "zod";
-import { draftSchema, idSchema, revisionSchema } from "../theme/schema.ts";
+import { draftSchema } from "../theme/schema.ts";
 import { upgradePalettes } from "../theme/sidebar.ts";
 import type { ThemeDraft } from "../theme/tokens.ts";
+import { ANY_THEME_ID_PATTERN, HASH_PATTERN } from "../themes/ids.ts";
 
 /** Versioned so a future draft shape can ignore old entries instead of misreading them. */
-export const DRAFT_STORAGE_KEY = "theme-builder.draft.v1";
+export const DRAFT_STORAGE_KEY = "theme-builder.draft.v2";
+/**
+ * Drafts of the preset era point at presets that are now bb themes under
+ * other ids; they cannot be matched, so they are dropped rather than misread.
+ */
+const LEGACY_DRAFT_KEYS = ["theme-builder.draft.v1"];
 /** Long enough to coalesce keystrokes and color drags into one write, short enough that a reload loses almost nothing. */
 export const DRAFT_SAVE_DEBOUNCE_MS = 500;
 
 const storedDraftSchema = z.strictObject({
   draft: draftSchema,
-  baseId: idSchema.nullable(),
-  baseRevision: revisionSchema.nullable(),
+  sourceId: z.string().regex(ANY_THEME_ID_PATTERN),
+  sourceHash: z.string().regex(HASH_PATTERN).nullable(),
+  baseline: draftSchema,
 });
-// A draft kept before the sidebar colors existed gains bb's own sidebar mixes, so a reload restores it instead of dropping it.
+// Drafts pass through the sidebar upgrade like every stored palette, so an entry written by an older build still loads.
 function upgradeStoredDraft(value: unknown): unknown {
-  if (typeof value !== "object" || value === null || !("draft" in value))
-    return value;
-  return { ...value, draft: upgradePalettes(value.draft) };
+  if (typeof value !== "object" || value === null) return value;
+  const record = value as Record<string, unknown>;
+  return {
+    ...record,
+    draft: upgradePalettes(record.draft),
+    baseline: upgradePalettes(record.baseline),
+  };
 }
-/** An unsaved draft plus the saved preset (and revision) it was edited from, so a reload can tell what changed. */
+/**
+ * An unsaved draft plus the theme it is a copy of: its id, the file hash it
+ * was loaded at (so Overwrite can refuse a file changed since), and the
+ * draft as loaded (so "unsaved" still means the same after a reload).
+ */
 export type StoredDraft = {
   draft: ThemeDraft;
-  baseId: string | null;
-  baseRevision: number | null;
+  sourceId: string;
+  sourceHash: string | null;
+  baseline: ThemeDraft;
 };
 
 /** Raised when the browser refuses a write (quota, private mode); callers keep editing and surface it. */
@@ -50,6 +66,7 @@ function cancelPending() {
 /** Corrupt, foreign, or unreadable entries are treated as absent: a draft is a convenience, never a reason to block the page. */
 export function loadStoredDraft(): StoredDraft | null {
   try {
+    for (const key of LEGACY_DRAFT_KEYS) localStorage.removeItem(key);
     const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
     if (raw === null) return null;
     const parsed = storedDraftSchema.safeParse(

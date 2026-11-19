@@ -1,10 +1,11 @@
 # Theme Builder
 
-A BB plugin for independent light and dark themes. Pick a theme from your list,
-then build it with the **AI**, **Edit**, or **Randomize** tab. Review an
-isolated preview, then **Save** or **Apply** from one action bar. Apply a theme
-across BB windows, then restore the previous appearance. Export JSON or CSS.
-Unsaved changes survive a reload. Only the AI tab needs a configured model.
+A BB plugin for independent light and dark themes. Pick any bb theme from the
+dropdown to open an editable copy, then change it with the **AI**, **Edit**, or
+**Randomize** tab. Review an isolated preview, then **Overwrite** the theme or
+**Save as new**. Undo and redo saved versions, switch bb to a theme with **Use
+theme**, and restore the previous appearance. Export JSON or CSS. Unsaved
+changes survive a reload. Only the AI tab needs a configured model.
 
 The implementation is in [`bb-plugin-theme-builder/`](bb-plugin-theme-builder/).
 Read the [user and recovery guide](bb-plugin-theme-builder/README.md) before

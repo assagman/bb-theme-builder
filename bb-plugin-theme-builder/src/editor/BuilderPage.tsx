@@ -1,9 +1,7 @@
 import { type ReactNode, useRef, useState } from "react";
 import { Button } from "../../components/ui/button.tsx";
-import { NEUTRAL_PRESET } from "../theme/defaults.ts";
 import { draftSchema } from "../theme/schema.ts";
 import { nextAnchor, type SidebarAnchor } from "../theme/sidebar.ts";
-import { swatchOf } from "../theme/swatch.ts";
 import { MODES, type Mode } from "../theme/tokens.ts";
 import { ActionBar } from "./ActionBar.tsx";
 import { AiTab } from "./AiTab.tsx";
@@ -16,20 +14,25 @@ import { PreviewFrame } from "./PreviewFrame.tsx";
 import { RandomizeTab } from "./RandomizeTab.tsx";
 import { EMPTY_ROLL_HISTORY } from "./roll-history.ts";
 import { useBuilderState } from "./state.ts";
-import type { Tab } from "./store.ts";
+import type { SourceKind, Tab } from "./store.ts";
 import { TabPanel, Tabs } from "./Tabs.tsx";
-import { type ThemeEntry, ThemeList } from "./ThemeList.tsx";
+import { ThemePicker } from "./ThemePicker.tsx";
 import "./editor.css";
 
-const NEUTRAL_SWATCH = swatchOf(NEUTRAL_PRESET);
-/** Never a real theme id (those are UUIDs), so the unsaved card cannot collide with a saved one. */
-const UNSAVED_ENTRY_ID = "unsaved";
+/** Status after the name when there are no unsaved edits, by where the copy came from. */
+const CLEAN_STATUS: Record<SourceKind, string> = {
+  builtin: COPY.statusBuiltIn,
+  plugin: COPY.statusPlugin,
+  custom: COPY.saved,
+  unsupported: COPY.statusUnsupported,
+  gone: COPY.statusGone,
+};
 
 /**
- * Theme Builder page: theme list on top, the three ways to make a theme
- * beside the live preview, and one action bar. All of it edits the single
- * working draft held by `useBuilderState`, called once here so its mount
- * effects (list, appearance, draft restore) run once.
+ * Theme Builder page: the theme dropdown on top, the three ways to edit the
+ * copy beside the live preview, and one action bar. All of it edits the
+ * single working copy held by `useBuilderState`, called once here so its
+ * mount effects (catalog, appearance, draft restore) run once.
  */
 export function BuilderPage() {
   const state = useBuilderState();
@@ -48,7 +51,7 @@ export function BuilderPage() {
   const [aiMessage, setAiMessage] = useState("");
   const { draft, mode, setMode, tab, setTab } = state;
   const valid = draftSchema.safeParse(draft).success;
-  // Last valid Background and Text per mode, followed on every render so AI, Randomize and preset loads move it too; held here because only the open tab is mounted and a half-typed hex must not reset it.
+  // Last valid Background and Text per mode, followed on every render so AI, Randomize and theme loads move it too; held here because only the open tab is mounted and a half-typed hex must not reset it.
   const anchorRef = useRef<Partial<Record<Mode, SidebarAnchor>>>({});
   const anchors = Object.fromEntries(
     MODES.map((m) => [
@@ -57,25 +60,19 @@ export function BuilderPage() {
     ]),
   ) as Record<Mode, SidebarAnchor>;
   anchorRef.current = anchors;
-  const builtInOpen = state.saved === null && !state.dirty;
-  // The state layer never prompts, so every path that would drop edits asks here.
-  const confirmDiscard = () => !state.dirty || window.confirm(COPY.discard);
+  const status = state.dirty ? COPY.dirty : CLEAN_STATUS[state.source.kind];
+  // Every action that replaces the working copy drops the rolls and any half-filled name form of the old one.
+  const replaced = (changed: boolean) => {
+    if (!changed) return;
+    setBarEpoch((value) => value + 1);
+    resetRolls();
+  };
   const discard = () => {
-    if (!confirmDiscard()) return;
+    // The state layer never prompts for Discard itself, because the restored-draft notice also calls it.
+    if (state.dirty && !window.confirm(COPY.discard)) return;
     resetRolls();
     state.discard();
   };
-  const createTheme = () => {
-    if (!confirmDiscard()) return;
-    setBarEpoch((value) => value + 1);
-    resetRolls();
-    state.newTheme();
-  };
-  const status = state.dirty
-    ? COPY.dirty
-    : state.saved === null
-      ? COPY.statusBuiltIn
-      : COPY.saved;
   // Render functions, so only the open tab's body is built on each render.
   const tabBodies: Record<Tab, () => ReactNode> = {
     ai: () => (
@@ -114,65 +111,22 @@ export function BuilderPage() {
       />
     ),
   };
-  const entries: ThemeEntry[] = [
-    {
-      id: "",
-      name: COPY.neutralBuiltIn,
-      swatch: NEUTRAL_SWATCH,
-      open: builtInOpen,
-      active: false,
-    },
-    // Right after Neutral, where the first edit of it happens, so the list does not jump.
-    ...(state.saved === null && state.dirty
-      ? [
-          {
-            id: UNSAVED_ENTRY_ID,
-            name: draft.name,
-            swatch: swatchOf(draft),
-            open: true,
-            active: false,
-            unsaved: true,
-          },
-        ]
-      : []),
-    ...state.presets.map((theme) => ({
-      id: theme.id,
-      name: theme.name,
-      swatch: theme.swatch,
-      open: theme.id === state.saved?.id,
-      active: theme.id === state.appliedPresetId,
-    })),
-  ];
   return (
     <div className="tb-shell">
       <div className="tb-body">
         <header className="tb-header">
           <h1 className="tb-title">{COPY.title}</h1>
         </header>
-        <section className="tb-themes" aria-label={COPY.yourThemes}>
-          <div className="tb-section-head">
-            <h2 className="tb-heading">{COPY.yourThemes}</h2>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={state.busy}
-              aria-label={COPY.newThemeLabel}
-              onClick={createTheme}
-            >
-              <span aria-hidden="true">+ </span>
-              {COPY.newTheme}
-            </Button>
-          </div>
-          <ThemeList
-            entries={entries}
-            disabled={state.busy}
-            onSelect={(id) => {
-              setBarEpoch((value) => value + 1);
-              if (state.select(id)) resetRolls();
-            }}
-          />
-        </section>
+        <ThemePicker
+          catalog={state.catalog}
+          source={state.source}
+          history={state.history}
+          busy={state.busy}
+          onSelect={(id) => replaced(state.select(id))}
+          onUndo={() => replaced(state.undo())}
+          onRedo={() => replaced(state.redo())}
+          onReload={() => replaced(state.select(state.source.id))}
+        />
         <div className="tb-workspace">
           <section className="tb-editor" aria-label={COPY.tabsLabel}>
             <Tabs value={tab} onChange={setTab} />
@@ -196,35 +150,31 @@ export function BuilderPage() {
                 ))}
               </fieldset>
             </div>
-            <PreviewFrame draft={draft} mode={mode} />
+            <PreviewFrame draft={draft} css={state.source.css} mode={mode} />
             <p className="tb-hint">{COPY.previewNote}</p>
           </section>
         </div>
         <ActionBar
-          key={`${state.saved?.id ?? UNSAVED_ENTRY_ID}-${barEpoch}`}
-          name={draft.name}
+          key={`${state.source.id}-${barEpoch}`}
+          name={state.source.label}
           status={status}
           dirty={state.dirty}
           busy={state.busy}
           valid={valid}
-          hasSaved={state.saved !== null}
+          source={{
+            kind: state.source.kind,
+            owned: state.source.owned,
+            active: state.source.id === state.catalog?.activeId,
+          }}
           appearance={{
             current: state.appearance,
             missingRestore: state.missingRestore,
           }}
           onDiscard={discard}
-          onSave={state.save}
-          onApply={state.apply}
+          onOverwrite={state.overwrite}
           onSaveAs={state.saveAs}
-          onRename={state.rename}
-          onDuplicate={() => {
-            setBarEpoch((value) => value + 1);
-            resetRolls();
-            state.duplicate();
-          }}
-          onDelete={() => {
-            if (state.remove()) resetRolls();
-          }}
+          onUseTheme={state.useTheme}
+          onDelete={() => replaced(state.remove())}
           onExport={state.download}
           onRestore={() => state.restore()}
           onUseDefault={() => state.restore(true)}

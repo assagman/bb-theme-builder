@@ -1,22 +1,28 @@
+/**
+ * Switches bb to a theme and back. Every switch records what was active
+ * before, so Restore can return to it, and refuses when the appearance
+ * changed since the page last looked.
+ */
 import { randomUUID } from "node:crypto";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import { createSerialExecutor } from "../presets/serial.ts";
-import type { PresetStore } from "../presets/store.ts";
-import { generateCss } from "../theme/css.ts";
-import { toDraft } from "../theme/schema.ts";
+import { describeError } from "../shared/describe-error.ts";
+import { createSerialExecutor } from "../shared/serial.ts";
+import type { RepaintResult } from "../themes/contract.ts";
+import { readThemeFile } from "../themes/files.ts";
+import {
+  BUILTIN_THEME_IDS,
+  DEFAULT_THEME_ID,
+  themeKind,
+} from "../themes/ids.ts";
 import {
   type Appearance,
   type AppearanceSnapshot,
   appearanceFingerprint,
   createAppearanceAdapter,
 } from "./adapter.ts";
-import { writeThemeRevision } from "./files.ts";
 import {
-  BUILTIN_THEME_IDS,
   DEFAULT_CODE_THEME,
-  DEFAULT_THEME_ID,
   EMPTY_OPERATIONS,
-  idKey,
   OPERATION_KEY,
   OPERATION_MESSAGES,
   type OperationState,
@@ -24,9 +30,6 @@ import {
   type PaletteIdentity,
   type PendingOperation,
 } from "./operations.ts";
-
-export { appliedPresetId } from "./operations.ts";
-
 import { restoreSourceFingerprint } from "./restore-source.ts";
 
 const PALETTE_FAVICON = "default";
@@ -45,8 +48,16 @@ function identity(appearance: Appearance): PaletteIdentity {
 function matches(appearance: Appearance, target: PaletteIdentity) {
   return identity(appearance).fingerprint === target.fingerprint;
 }
+type ApplyRecord = NonNullable<OperationState["lastApply"]>;
+/** The restore record now pointing at what bb actually painted, since only that can be matched later. */
+function retarget(record: ApplyRecord, painted: Appearance): OperationState {
+  return {
+    pending: null,
+    lastApply: { ...record, target: identity(painted) },
+  };
+}
 
-export function createAppearanceService(bb: BbPluginApi, store: PresetStore) {
+export function createAppearanceService(bb: BbPluginApi) {
   const adapter = createAppearanceAdapter(bb.sdk.theme);
   const serial = createSerialExecutor();
   const persist = (state: OperationState) =>
@@ -85,14 +96,17 @@ export function createAppearanceService(bb: BbPluginApi, store: PresetStore) {
       pending.target.themeId,
       current.fingerprint,
     );
-    if (
+    const reached =
       selected.kind === "selected" &&
-      matches(selected.current.appearance, pending.target)
-    ) {
-      await persist({
-        pending: null,
-        lastApply: pending.kind === "apply" ? pending.record : null,
-      });
+      (pending.kind === "apply"
+        ? selected.current.appearance.themeId === pending.target.themeId
+        : matches(selected.current.appearance, pending.target));
+    if (reached) {
+      await persist(
+        pending.kind === "apply"
+          ? retarget(pending.record, selected.current.appearance)
+          : { pending: null, lastApply: null },
+      );
       return {
         kind: pending.kind === "apply" ? "applied" : "restored",
         operationId: pending.operationId,
@@ -118,46 +132,43 @@ export function createAppearanceService(bb: BbPluginApi, store: PresetStore) {
           operationId: state.lastApply?.operationId ?? null,
         };
       }),
-    apply: (input: {
-      id: string;
-      revision: number;
-      observedFingerprint: string;
-    }) =>
+    select: (input: { themeId: string; observedFingerprint: string }) =>
       serial.run(async (): Promise<Outcome> => {
         try {
           const { state, current } = await reconcile();
           if (current.fingerprint !== input.observedFingerprint)
             return { kind: "conflict", message: OPERATION_MESSAGES.changed };
-          const preset = await store.get(input.id);
-          if (preset === null || preset.revision !== input.revision)
-            return { kind: "conflict", message: OPERATION_MESSAGES.revision };
-          const css = generateCss(toDraft(preset));
-          const operationId = randomUUID();
-          const themeId = `theme-builder-${idKey(preset.id)}-r${preset.revision}-${idKey(operationId)}`;
-          try {
-            writeThemeRevision((await adapter.catalog()).dir, themeId, css);
-          } catch {
-            return { kind: "failed", message: OPERATION_MESSAGES.files };
-          }
-          const observed = await adapter.read();
-          if (observed.fingerprint !== input.observedFingerprint)
-            return { kind: "conflict", message: OPERATION_MESSAGES.changed };
-          const previous = identity(observed.appearance);
+          if (current.appearance.themeId === input.themeId)
+            return {
+              kind: "failed",
+              message: OPERATION_MESSAGES.alreadyActive,
+            };
+          const catalog = await adapter.catalog();
+          // Only an id bb lists can be selected; a custom folder with an unusual name is still bb's to load, just not ours to read.
+          const kind = themeKind(catalog, input.themeId);
+          if (kind === "missing")
+            return {
+              kind: "missing",
+              message: OPERATION_MESSAGES.missingTheme,
+            };
+          const custom =
+            kind === "custom"
+              ? readThemeFile(catalog.dir, input.themeId)
+              : null;
+          const previous = identity(current.appearance);
+          // Best guess of the painted result for crash recovery; activate replaces it with bb's readback.
           const target = identity({
-            ...observed.appearance,
-            themeId,
-            customCss: css,
+            ...current.appearance,
+            themeId: input.themeId,
+            customCss: custom?.css ?? null,
             resolvedCodeTheme: DEFAULT_CODE_THEME,
           });
           const previousSourceFingerprint = BUILTIN_THEME_IDS.includes(
             previous.themeId,
           )
             ? null
-            : await restoreSourceFingerprint(
-                bb,
-                await adapter.catalog(),
-                previous.themeId,
-              );
+            : await restoreSourceFingerprint(bb, catalog, previous.themeId);
+          const operationId = randomUUID();
           const record = {
             operationId,
             previous,
@@ -167,11 +178,44 @@ export function createAppearanceService(bb: BbPluginApi, store: PresetStore) {
           return await activate(
             { kind: "apply", operationId, previous, target, record },
             state,
-            observed,
+            current,
           );
-        } catch {
+        } catch (cause) {
+          bb.log.warn(
+            JSON.stringify({
+              operation: "select",
+              themeId: input.themeId,
+              cause: describeError(cause),
+            }),
+          );
           return { kind: "failed", message: OPERATION_MESSAGES.failed };
         }
+      }),
+    /**
+     * Re-selects the active theme after its file was rewritten, so bb paints
+     * the new CSS. When the theme was the target of the last switch, the
+     * restore record follows it; otherwise Restore would be lost by a save.
+     * bb reports a custom theme's CSS live from disk, so the record is
+     * matched against `previousCss`, the file as it was before the write
+     * (null when there was none).
+     */
+    repaint: (themeId: string, css: string, previousCss: string | null) =>
+      serial.run(async (): Promise<RepaintResult> => {
+        const { state, current } = await reconcile();
+        if (current.appearance.themeId !== themeId) return "inactive";
+        const tracked =
+          state.lastApply !== null &&
+          matches(
+            { ...current.appearance, customCss: previousCss },
+            state.lastApply.target,
+          );
+        const selected = await adapter.select(themeId, current.fingerprint);
+        const painted =
+          selected.kind === "selected" &&
+          selected.current.appearance.customCss === css;
+        if (painted && tracked && state.lastApply !== null)
+          await persist(retarget(state.lastApply, selected.current.appearance));
+        return painted ? "repainted" : "unconfirmed";
       }),
     restore: (input: {
       operationId: string;

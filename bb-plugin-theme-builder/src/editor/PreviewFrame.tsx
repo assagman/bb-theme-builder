@@ -11,9 +11,12 @@ import { previewDocument } from "./preview.ts";
  */
 export function PreviewFrame({
   draft,
+  css,
   mode,
 }: {
   draft: ThemeDraft;
+  /** The source theme's CSS, so the preview paints the copy exactly as bb will. */
+  css: string | null;
   mode: Mode;
 }) {
   const [valid, setValid] = useState<ThemeDraft>(NEUTRAL_PRESET);
@@ -21,7 +24,10 @@ export function PreviewFrame({
     const parsed = draftSchema.safeParse(draft);
     if (parsed.success) setValid(parsed.data);
   }, [draft]);
-  const document = useMemo(() => previewDocument(valid, mode), [valid, mode]);
+  const document = useMemo(
+    () => previewDocument(valid, css, mode),
+    [valid, css, mode],
+  );
   // Chromium drops a srcdoc update that lands while the previous srcdoc is
   // still loading (the async draft restore right after the neutral first
   // render), leaving the stale document. Keying on the document gives a fresh

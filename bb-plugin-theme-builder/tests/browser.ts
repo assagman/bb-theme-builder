@@ -17,6 +17,7 @@ const PREVIEW_RETRY_MS = 100;
 // The dialog can be closed by the browser itself within moments, so it is polled much faster than page conditions.
 const DIALOG_POLL_MS = 5;
 const SHELL_SCOPE = ".tb-shell";
+const THEME_SELECT = "#tb-theme-select";
 const PAINT_SETTLED_EXPRESSION =
   "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))";
 class BrowserTransportError extends Error {
@@ -235,16 +236,17 @@ export class Page {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     })()`);
   }
-  // Cards are matched by name because ids are unknown until the first save; `expected` covers a declined discard prompt.
-  async selectTheme(name: string, expected = name) {
+  // The dropdown is driven by id, the value every option carries; `expected` covers a declined discard prompt that keeps the open theme.
+  async selectTheme(id: string, expected = id) {
+    const select = `document.querySelector(${JSON.stringify(THEME_SELECT)})`;
     await this.wait(
-      `Array.from(document.querySelectorAll('.tb-list button')).some(b => b.textContent.includes(${JSON.stringify(name)}) && !b.disabled)`,
+      `Boolean(${select} && !${select}.disabled && Array.from(${select}.options).some(o => o.value === ${JSON.stringify(id)}))`,
     );
     await this.evaluate(
-      `Array.from(document.querySelectorAll('.tb-list button')).find(b => b.querySelector('.tb-card-name').textContent === ${JSON.stringify(name)}).click()`,
+      `(() => { const select = ${select}; select.value = ${JSON.stringify(id)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`,
     );
     await this.wait(
-      `Array.from(document.querySelectorAll('.tb-list [aria-current=true] .tb-card-name')).some(n => n.textContent === ${JSON.stringify(expected)}) && !Array.from(document.querySelectorAll('.tb-list button')).some(b => b.disabled)`,
+      `${select}.value === ${JSON.stringify(expected)} && !${select}.disabled`,
     );
   }
   async dialog(action: () => Promise<unknown>, accept: boolean) {

@@ -5,31 +5,15 @@ import { MAX_NAME_LENGTH } from "../theme/tokens.ts";
 import { COPY } from "./copy.ts";
 import { KEY_ESCAPE } from "./keys.ts";
 
-/** What the name is for; save and apply create the theme, rename edits it. */
-export type Naming = "save" | "apply" | "rename";
-const HINT: Record<Naming, string> = {
-  save: COPY.nameHintSave,
-  apply: COPY.nameHintApply,
-  rename: COPY.nameHintRename,
-};
-const SUBMIT: Record<Naming, string> = {
-  save: COPY.save,
-  apply: COPY.apply,
-  rename: COPY.renameConfirm,
-};
-
 /**
- * Asks for the theme name inline, so naming a new theme is part of saving it
- * rather than a separate field to find. Callers key it on `naming` so the
- * initial value is never left over from another purpose.
+ * Asks for the new theme's name inline when saving as new, so naming is part
+ * of saving rather than a separate field to find.
  */
 export function NameForm({
-  naming,
   initial,
   onSubmit,
   onCancel,
 }: {
-  naming: Naming;
   initial: string;
   onSubmit: (name: string) => void;
   onCancel: () => void;
@@ -51,7 +35,7 @@ export function NameForm({
       }}
     >
       <label className="tb-name-label" htmlFor="tb-name-input">
-        {HINT[naming]}
+        {COPY.nameHint}
       </label>
       <Input
         id="tb-name-input"
@@ -62,7 +46,7 @@ export function NameForm({
         onChange={(event) => setValue(event.target.value)}
       />
       <Button type="submit" disabled={name === ""}>
-        {SUBMIT[naming]}
+        {COPY.save}
       </Button>
       <Button type="button" variant="ghost" onClick={onCancel}>
         {COPY.cancel}
