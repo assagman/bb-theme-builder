@@ -160,23 +160,33 @@ async function boundedKv<T>(promise: Promise<T>): Promise<T> {
 }
 
 /**
- * Owns the single chat session of this plugin install. Every state change runs through one serial queue;
- * agent turns run outside it and re-enter it only to record their outcome, so Stop and end never wait on a turn.
- * Changes are built as a new record, persisted, and only then assigned, so a failed write leaves memory and kv agreeing.
+ * Mutable state of one chat manager. It lives in a single object shared by reference, so the record store,
+ * the turn runner, and the public API always read and write the same values and no copy can drift.
  */
-export function createChatSessions(
-  bb: BbPluginApi,
-  kv: PluginKvStorage,
-  now: () => number = Date.now,
-) {
-  // Captured cleanup methods remain usable after BB invalidates fresh SDK access during disposal.
-  const threads = bb.sdk.threads;
-  const serial = createSerialExecutor();
-  let record: SessionRecord | null = null;
-  let loaded = false;
-  let turn: Turn | null = null;
-  let error: string | null = null;
-  let closed = false;
+type SessionMemory = {
+  record: SessionRecord | null;
+  loaded: boolean;
+  turn: Turn | null;
+  error: string | null;
+  closed: boolean;
+};
+
+/** Everything the parts of one chat manager share: its dependencies, the one serial queue, and the one state holder. */
+type SessionContext = {
+  bb: BbPluginApi;
+  kv: PluginKvStorage;
+  now: () => number;
+  threads: BbPluginApi["sdk"]["threads"];
+  serial: ReturnType<typeof createSerialExecutor>;
+  memory: SessionMemory;
+};
+
+/**
+ * Record persistence and lifecycle for one chat manager: load (with crash recovery), save, view, and end.
+ * Split from the turn runner so each half stays reviewable; both act on the caller's shared `SessionContext`.
+ */
+function createRecordStore(context: SessionContext) {
+  const { bb, kv, now, threads, memory } = context;
 
   function log(level: "info" | "warn", fields: Record<string, unknown>) {
     bb.log[level](JSON.stringify(fields));
@@ -211,12 +221,12 @@ export function createChatSessions(
       await stopThread(bb, threads, found.threadId, {
         sessionId: found.sessionId,
       });
-    record = await persist({
+    memory.record = await persist({
       ...found,
       pendingRequestId: null,
       contextDirty: true,
     });
-    error = MESSAGES.interrupted;
+    memory.error = MESSAGES.interrupted;
     log("warn", {
       event: "chat_turn_interrupted",
       operation: "load",
@@ -227,7 +237,7 @@ export function createChatSessions(
 
   // A corrupt row is dropped after compensating its thread, so a bad write can never wedge the chat.
   async function load(): Promise<SessionRecord | null> {
-    if (loaded) return record;
+    if (memory.loaded) return memory.record;
     const value = await boundedKv(kv.get<unknown>(SESSION_KEY));
     if (value !== undefined) {
       const parsed = sessionRecordSchema.safeParse(value);
@@ -240,13 +250,14 @@ export function createChatSessions(
         await boundedKv(kv.delete(SESSION_KEY));
       } else if (parsed.data.pendingRequestId !== null)
         await recoverInterrupted(parsed.data);
-      else record = parsed.data;
+      else memory.record = parsed.data;
     }
-    loaded = true;
-    return record;
+    memory.loaded = true;
+    return memory.record;
   }
 
   function state(): ChatState {
+    const { record } = memory;
     if (record === null) return { kind: "none" };
     return {
       kind: "open",
@@ -254,13 +265,13 @@ export function createChatSessions(
       selection: record.selection,
       accent: record.accent,
       turns: record.turns,
-      running: turn?.sessionId === record.sessionId,
-      error,
+      running: memory.turn?.sessionId === record.sessionId,
+      error: memory.error,
     };
   }
 
   function ensureOpen() {
-    if (closed) throw new ChatSessionError("CLOSED", MESSAGES.closed);
+    if (memory.closed) throw new ChatSessionError("CLOSED", MESSAGES.closed);
   }
 
   async function requireSession(sessionId: string): Promise<SessionRecord> {
@@ -272,13 +283,13 @@ export function createChatSessions(
 
   // Must run inside the serial queue; deleting the row last keeps a crash mid-cleanup retryable by the sweeper.
   async function endCurrent(reason: string): Promise<void> {
-    const current = record;
+    const current = memory.record;
     if (current === null) return;
     const started = now();
-    const running = turn?.sessionId === current.sessionId;
-    if (running) turn?.controller.abort();
-    record = null;
-    error = null;
+    const running = memory.turn?.sessionId === current.sessionId;
+    if (running) memory.turn?.controller.abort();
+    memory.record = null;
+    memory.error = null;
     // An idle thread only needs archiving; stopping it too would just log a rejected stop.
     if (current.threadId !== null)
       await cleanupThread(bb, threads, current.threadId, !running, {
@@ -295,6 +306,30 @@ export function createChatSessions(
     });
   }
 
+  return {
+    log,
+    chatTurn,
+    persist,
+    load,
+    state,
+    ensureOpen,
+    requireSession,
+    endCurrent,
+  };
+}
+
+/** Record operations the turn runner and the public API build on. */
+type RecordStore = ReturnType<typeof createRecordStore>;
+
+/**
+ * Agent turn lifecycle for one chat manager: spawn or reuse the thread, run the turn outside the serial queue,
+ * and record its outcome back inside it. Shares the caller's `SessionContext`, so a Stop or end seen by the
+ * API is the same state the running turn checks.
+ */
+function createTurnRunner(context: SessionContext, store: RecordStore) {
+  const { bb, now, threads, serial, memory } = context;
+  const { log, chatTurn, persist, state } = store;
+
   // Records the thread ID only if the session still exists and the write succeeds; otherwise the fresh thread is compensated at once.
   async function attachThread(
     sessionId: string,
@@ -303,8 +338,8 @@ export function createChatSessions(
     let attached: boolean;
     try {
       attached = await serial.run(async () => {
-        if (record?.sessionId !== sessionId) return false;
-        record = await persist({ ...record, threadId });
+        if (memory.record?.sessionId !== sessionId) return false;
+        memory.record = await persist({ ...memory.record, threadId });
         return true;
       });
     } catch (cause) {
@@ -375,10 +410,10 @@ export function createChatSessions(
   // Applies a turn outcome only if this turn is still the session's current one; a stale or ended turn changes nothing.
   async function finishTurn(entry: Turn, outcome: TurnOutcome): Promise<void> {
     await serial.run(async () => {
-      if (turn !== entry) return;
-      turn = null;
-      if (record?.sessionId !== entry.sessionId) return;
-      const base = { ...record, pendingRequestId: null };
+      if (memory.turn !== entry) return;
+      memory.turn = null;
+      if (memory.record?.sessionId !== entry.sessionId) return;
+      const base = { ...memory.record, pendingRequestId: null };
       const next: SessionRecord = outcome.ok
         ? {
             ...base,
@@ -391,10 +426,10 @@ export function createChatSessions(
           }
         : { ...base, contextDirty: true };
       try {
-        record = await persist(next);
-        error = outcome.ok ? null : outcome.message;
+        memory.record = await persist(next);
+        memory.error = outcome.ok ? null : outcome.message;
       } catch (cause) {
-        error = MESSAGES.storage;
+        memory.error = MESSAGES.storage;
         throw cause;
       }
     });
@@ -402,7 +437,7 @@ export function createChatSessions(
 
   function logSettleFailure(sessionId: string, cause: unknown) {
     // A closed queue means disposal already ended the session; anything else lost a turn and must be visible.
-    if (closed) return;
+    if (memory.closed) return;
     log("warn", {
       event: "chat_turn_settle_failed",
       operation: "settle",
@@ -423,20 +458,56 @@ export function createChatSessions(
       lastRequestId: requestId,
       pendingRequestId: requestId,
     });
-    record = current;
-    error = null;
+    memory.record = current;
+    memory.error = null;
     const entry: Turn = {
       sessionId: current.sessionId,
       controller: new AbortController(),
       task: Promise.resolve(),
       stopped: false,
     };
-    turn = entry;
+    memory.turn = entry;
     entry.task = runTurn(entry, current, requestId, deliver)
       .then((outcome) => finishTurn(entry, outcome))
       .catch((cause) => logSettleFailure(entry.sessionId, cause));
     return state();
   }
+
+  return { spawnDelivery, beginTurn };
+}
+
+/**
+ * Owns the single chat session of this plugin install. Every state change runs through one serial queue;
+ * agent turns run outside it and re-enter it only to record their outcome, so Stop and end never wait on a turn.
+ * Changes are built as a new record, persisted, and only then assigned, so a failed write leaves memory and kv agreeing.
+ */
+export function createChatSessions(
+  bb: BbPluginApi,
+  kv: PluginKvStorage,
+  now: () => number = Date.now,
+) {
+  // Captured cleanup methods remain usable after BB invalidates fresh SDK access during disposal.
+  const threads = bb.sdk.threads;
+  const serial = createSerialExecutor();
+  const memory: SessionMemory = {
+    record: null,
+    loaded: false,
+    turn: null,
+    error: null,
+    closed: false,
+  };
+  const context: SessionContext = { bb, kv, now, threads, serial, memory };
+  const store = createRecordStore(context);
+  const {
+    chatTurn,
+    persist,
+    load,
+    state,
+    ensureOpen,
+    requireSession,
+    endCurrent,
+  } = store;
+  const { spawnDelivery, beginTurn } = createTurnRunner(context, store);
 
   return {
     /** Ends any open chat and starts a new one; a retried request with the same ID returns the existing chat. */
@@ -478,7 +549,7 @@ export function createChatSessions(
       return serial.run(async () => {
         const current = await requireSession(input.sessionId);
         if (current.lastRequestId === input.requestId) return state();
-        if (turn?.sessionId === current.sessionId)
+        if (memory.turn?.sessionId === current.sessionId)
           throw new ChatSessionError("BUSY", MESSAGES.busy);
         const edited =
           current.lastAgentPalette !== null &&
@@ -526,7 +597,7 @@ export function createChatSessions(
     async stop({ sessionId }: { sessionId: string }): Promise<ChatState> {
       ensureOpen();
       const current = await serial.run(() => requireSession(sessionId));
-      const entry = turn;
+      const entry = memory.turn;
       if (entry?.sessionId === sessionId) {
         entry.stopped = true;
         entry.controller.abort();
@@ -550,7 +621,7 @@ export function createChatSessions(
       return serial.run(async () => {
         const current = await load();
         if (current?.sessionId !== sessionId) return { alive: false };
-        record = await persist({ ...current, lastPingAt: now() });
+        memory.record = await persist({ ...current, lastPingAt: now() });
         return { alive: true };
       });
     },
@@ -569,9 +640,9 @@ export function createChatSessions(
     },
     /** Disposal: ends the chat so no agent thread outlives the plugin, then waits a bounded time for the turn task. */
     async close(): Promise<void> {
-      if (closed) return;
-      closed = true;
-      const entry = turn;
+      if (memory.closed) return;
+      memory.closed = true;
+      const entry = memory.turn;
       try {
         await serial.run(async () => {
           await load();

@@ -35,34 +35,32 @@ export type ActionBarProps = {
 };
 
 /**
- * The one place to save and apply: `<name> · status` and Discard, Save, Apply,
- * and a menu for the rarer actions. Save and Apply on a theme that is not
- * saved yet ask for a name first, which is how Neutral becomes a new theme.
- * The page keys this on the open theme so a half-filled name form cannot
- * outlive a theme switch.
+ * Save and Apply refuse while a request runs or the draft is invalid; Save also has nothing to do on a
+ * saved theme without edits, and Apply needs the server's appearance state before it can switch.
  */
-export function ActionBar(props: ActionBarProps) {
-  const [naming, setNaming] = useState<Naming | null>(null);
-  const { appearance } = props;
-  const needsName = !props.hasSaved;
-  // The built-in's own name would make every new theme start as a duplicate of it.
-  const suggestedName = props.name === NEUTRAL_PRESET.name ? "" : props.name;
-  const saveDisabled =
-    props.busy || !props.valid || (!props.dirty && props.hasSaved);
-  const applyDisabled =
-    props.busy || !props.valid || appearance.current === null;
-  const finishNaming = (name: string) => {
-    const kind = naming;
-    setNaming(null);
-    if (kind === "rename") props.onRename(name);
-    else if (kind !== null) props.onSaveAs(name, { apply: kind === "apply" });
+function primaryDisabled(props: ActionBarProps) {
+  const blocked = props.busy || !props.valid;
+  return {
+    save: blocked || (!props.dirty && props.hasSaved),
+    apply: blocked || props.appearance.current === null,
   };
-  const menuItems: MenuItem[] = [
+}
+
+/**
+ * The rarer actions behind the More menu. Kept out of the component so each rule for when an action is
+ * off reads on its own; `startRename` opens the name form, which only the component's state can do.
+ */
+function moreMenuItems(
+  props: ActionBarProps,
+  startRename: () => void,
+): MenuItem[] {
+  const { appearance } = props;
+  return [
     {
       label: COPY.rename,
       // Renaming the pristine built-in would only edit a draft nobody can save under that name.
       disabled: props.busy || (!props.hasSaved && !props.dirty),
-      run: () => setNaming("rename"),
+      run: startRename,
     },
     { label: COPY.duplicate, disabled: props.busy, run: props.onDuplicate },
     {
@@ -95,6 +93,28 @@ export function ActionBar(props: ActionBarProps) {
         ]
       : []),
   ];
+}
+
+/**
+ * The one place to save and apply: `<name> · status` and Discard, Save, Apply,
+ * and a menu for the rarer actions. Save and Apply on a theme that is not
+ * saved yet ask for a name first, which is how Neutral becomes a new theme.
+ * The page keys this on the open theme so a half-filled name form cannot
+ * outlive a theme switch.
+ */
+export function ActionBar(props: ActionBarProps) {
+  const [naming, setNaming] = useState<Naming | null>(null);
+  const needsName = !props.hasSaved;
+  // The built-in's own name would make every new theme start as a duplicate of it.
+  const suggestedName = props.name === NEUTRAL_PRESET.name ? "" : props.name;
+  const disabled = primaryDisabled(props);
+  const finishNaming = (name: string) => {
+    const kind = naming;
+    setNaming(null);
+    if (kind === "rename") props.onRename(name);
+    else if (kind !== null) props.onSaveAs(name, { apply: kind === "apply" });
+  };
+  const menuItems = moreMenuItems(props, () => setNaming("rename"));
   return (
     <section className="tb-action-bar" aria-label={COPY.actionBarLabel}>
       {naming !== null && (
@@ -125,14 +145,14 @@ export function ActionBar(props: ActionBarProps) {
           <Button
             type="button"
             variant="outline"
-            disabled={saveDisabled}
+            disabled={disabled.save}
             onClick={() => (needsName ? setNaming("save") : props.onSave())}
           >
             {COPY.save}
           </Button>
           <Button
             type="button"
-            disabled={applyDisabled}
+            disabled={disabled.apply}
             onClick={() => (needsName ? setNaming("apply") : props.onApply())}
           >
             {COPY.apply}
