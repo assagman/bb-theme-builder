@@ -1,9 +1,10 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { Button } from "../../components/ui/button.tsx";
 import { NEUTRAL_PRESET } from "../theme/defaults.ts";
 import { draftSchema } from "../theme/schema.ts";
+import { nextAnchor, type SidebarAnchor } from "../theme/sidebar.ts";
 import { swatchOf } from "../theme/swatch.ts";
-import { MODES } from "../theme/tokens.ts";
+import { MODES, type Mode } from "../theme/tokens.ts";
 import { ActionBar } from "./ActionBar.tsx";
 import { AiTab } from "./AiTab.tsx";
 import { useChat } from "./chat.ts";
@@ -47,6 +48,15 @@ export function BuilderPage() {
   const [aiMessage, setAiMessage] = useState("");
   const { draft, mode, setMode, tab, setTab } = state;
   const valid = draftSchema.safeParse(draft).success;
+  // Last valid Background and Text per mode, followed on every render so AI, Randomize and preset loads move it too; held here because only the open tab is mounted and a half-typed hex must not reset it.
+  const anchorRef = useRef<Partial<Record<Mode, SidebarAnchor>>>({});
+  const anchors = Object.fromEntries(
+    MODES.map((m) => [
+      m,
+      nextAnchor(anchorRef.current[m] ?? draft[m], draft[m]),
+    ]),
+  ) as Record<Mode, SidebarAnchor>;
+  anchorRef.current = anchors;
   const builtInOpen = state.saved === null && !state.dirty;
   // The state layer never prompts, so every path that would drop edits asks here.
   const confirmDiscard = () => !state.dirty || window.confirm(COPY.discard);
@@ -87,6 +97,7 @@ export function BuilderPage() {
         draft={draft}
         mode={mode}
         busy={state.busy}
+        anchors={anchors}
         onChange={state.setDraft}
       />
     ),

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { draftSchema, idSchema, revisionSchema } from "../theme/schema.ts";
+import { upgradePalettes } from "../theme/sidebar.ts";
 import type { ThemeDraft } from "../theme/tokens.ts";
 
 /** Versioned so a future draft shape can ignore old entries instead of misreading them. */
@@ -12,6 +13,12 @@ const storedDraftSchema = z.strictObject({
   baseId: idSchema.nullable(),
   baseRevision: revisionSchema.nullable(),
 });
+// A draft kept before the sidebar colors existed gains bb's own sidebar mixes, so a reload restores it instead of dropping it.
+function upgradeStoredDraft(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || !("draft" in value))
+    return value;
+  return { ...value, draft: upgradePalettes(value.draft) };
+}
 /** An unsaved draft plus the saved preset (and revision) it was edited from, so a reload can tell what changed. */
 export type StoredDraft = {
   draft: ThemeDraft;
@@ -45,7 +52,9 @@ export function loadStoredDraft(): StoredDraft | null {
   try {
     const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
     if (raw === null) return null;
-    const parsed = storedDraftSchema.safeParse(JSON.parse(raw));
+    const parsed = storedDraftSchema.safeParse(
+      upgradeStoredDraft(JSON.parse(raw)),
+    );
     return parsed.success ? parsed.data : null;
   } catch {
     return null;

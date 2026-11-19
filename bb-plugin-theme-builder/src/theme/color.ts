@@ -1,5 +1,7 @@
 export type Oklch = { l: number; c: number; h: number };
 
+/** The only color form themes store: lowercase `#rrggbb`, so equality checks never see two spellings of one color. */
+export const COLOR_PATTERN = /^#[0-9a-f]{6}$/;
 const HEX_RADIX = 16;
 const CHANNEL_MAX = 255;
 const HEX_CHANNEL_DIGITS = 2;

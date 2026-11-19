@@ -15,7 +15,9 @@ The page has four parts. All of them work on one working theme.
   card to open it. **New** starts again from Neutral.
 - **Three tabs** let you change the theme: **AI**, **Edit**, and
   **Randomize**. They all change the same draft. Switch tabs at any time.
-- **Preview** shows the draft. Choose **Light** or **Dark** to see each mode.
+- **Preview** shows the draft as a whole bb window: icon rail, sidebar,
+  thread with composer, and a side panel. Choose **Light** or **Dark** to see
+  each mode.
 - **The action bar** is the one place to save and apply. It shows the theme
   name and its state (**Unsaved changes**, **Saved**, or **Built-in theme**).
   It has **Discard**, **Save**, **Apply**, and a **More actions** menu.
@@ -52,7 +54,10 @@ the theme to keep it for good. Saved themes survive a server restart.
 
 ### Edit tab
 
-Colors are in groups: **Basics**, **Text**, **Status**, and **Code & git**.
+Colors are in groups: **Basics**, **Sidebar**, **Text**, **Status**, and
+**Code & git**. **Sidebar** sets the left side panel apart from the main
+screen: its background, text, row hover, and border. Themes saved before this
+group existed get bb's own sidebar colors, so they look the same as before.
 The **Code & git** group starts closed. Each color has a picker and a hex field.
 A badge on the color row shows its contrast ratio and a pass or fail mark.
 A group title shows how many of its colors fail. Contrast checks do not

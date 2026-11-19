@@ -17,6 +17,8 @@ const PALETTE_RULES = [
   "Aim for at least 4.5:1 contrast for text on canvas, primaryForeground on primary, and destructiveForeground on destructive.",
   "Keep warning, success, destructive, and diff colors recognizable while coordinating their tones with the palette.",
   "diffAdded and diffRemoved are TEXT colors on canvas, not background fills. Keep these and all semantic text colors readable on canvas in each mode.",
+  "The sidebar tokens paint the whole left side panel of the app: sidebar is its background, sidebarForeground its text, sidebarAccent the hover fill of its rows, and sidebarBorder its dividers. They are independent of canvas: when the user asks to change the side panel, sidebar, or side components, change these tokens and leave canvas alone. When you change canvas or ink for another reason, restyle the sidebar tokens to suit the new canvas and ink, unless the user asked for a specific sidebar look.",
+  "Keep sidebarForeground and mutedForeground at least 4.5:1 on sidebar, and sidebarForeground at least 4.5:1 on sidebarAccent.",
 ];
 // The reply must echo the request ID, because a poll right after a send can still read the previous turn's reply.
 const REPLY_CONTRACT =

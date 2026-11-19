@@ -9,6 +9,7 @@ import type { BbPluginApi, PluginKvStorage } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { createSerialExecutor } from "../presets/serial.ts";
 import { idSchema, samePalette } from "../theme/schema.ts";
+import { upgradeSessionPalettes } from "../theme/sidebar.ts";
 import {
   accentSchema,
   CHAT_ENDED_MESSAGE,
@@ -240,7 +241,9 @@ function createRecordStore(context: SessionContext) {
     if (memory.loaded) return memory.record;
     const value = await boundedKv(kv.get<unknown>(SESSION_KEY));
     if (value !== undefined) {
-      const parsed = sessionRecordSchema.safeParse(value);
+      const parsed = sessionRecordSchema.safeParse(
+        upgradeSessionPalettes(value),
+      );
       if (!parsed.success) {
         const reference = threadReferenceSchema.safeParse(value);
         const threadId = reference.success ? reference.data.threadId : null;

@@ -1,7 +1,8 @@
 import { Input } from "../../components/ui/input.tsx";
+import { COLOR_PATTERN } from "../theme/color.ts";
 import { type TokenContrast, tokenContrast } from "../theme/contrast.ts";
 import { NEUTRAL_PRESET } from "../theme/defaults.ts";
-import { COLOR_PATTERN } from "../theme/schema.ts";
+import { editToken, type SidebarAnchor } from "../theme/sidebar.ts";
 import {
   CODE_FONTS,
   type Mode,
@@ -54,14 +55,22 @@ function ContrastBadge({
 export function TokenControls({
   draft,
   mode,
+  anchors,
   onChange,
 }: {
   draft: ThemeDraft;
   mode: Mode;
+  /** Last valid Background and Text per mode, owned by the page so it survives tab switches. */
+  anchors: Record<Mode, SidebarAnchor>;
   onChange: (draft: ThemeDraft) => void;
 }) {
-  const change = (key: TokenKey, value: string) =>
-    onChange({ ...draft, [mode]: { ...draft[mode], [key]: value } });
+  const change = (key: TokenKey, value: string) => {
+    const current = draft[mode];
+    onChange({
+      ...draft,
+      [mode]: editToken(current, key, value, mode, anchors[mode]),
+    });
+  };
   const row = (key: TokenKey) => {
     const token = TOKEN_DEFINITIONS[key];
     const color = draft[mode][key];

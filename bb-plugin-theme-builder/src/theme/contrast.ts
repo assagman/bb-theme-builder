@@ -1,5 +1,4 @@
-import { hexToLinearRgb } from "./color.ts";
-import { COLOR_PATTERN } from "./schema.ts";
+import { COLOR_PATTERN, hexToLinearRgb } from "./color.ts";
 import type { PaletteTokens, TokenKey } from "./tokens.ts";
 
 const WEIGHTS = [0.2126, 0.7152, 0.0722];
@@ -11,6 +10,9 @@ export const TEXT_PAIRS: readonly [TokenKey, TokenKey][] = [
   ["mutedForeground", "canvas"],
   ["subtleForeground", "canvas"],
   ["readbackForeground", "canvas"],
+  ["sidebarForeground", "sidebar"],
+  ["sidebarForeground", "sidebarAccent"],
+  ["mutedForeground", "sidebar"],
   ["primaryForeground", "primary"],
   ["destructiveForeground", "destructive"],
   ["destructiveText", "canvas"],

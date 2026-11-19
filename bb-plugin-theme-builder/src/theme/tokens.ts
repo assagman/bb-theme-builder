@@ -11,7 +11,13 @@ export type Mode = (typeof MODES)[number];
  * Purpose groups of the Edit tab, in display order. Colors are grouped by what
  * they style so a user finds "the red ones" without knowing token names.
  */
-export const TOKEN_GROUPS = ["basics", "text", "status", "code"] as const;
+export const TOKEN_GROUPS = [
+  "basics",
+  "sidebar",
+  "text",
+  "status",
+  "code",
+] as const;
 export type TokenGroup = (typeof TOKEN_GROUPS)[number];
 
 /**
@@ -34,6 +40,23 @@ export const TOKEN_DEFINITIONS = {
     label: "Accent text",
     css: "--primary-foreground",
     group: "basics",
+  },
+  // The left side panel has its own surface in bb, so a theme can keep the main screen and still recolor the panel.
+  sidebar: { label: "Sidebar background", css: "--sidebar", group: "sidebar" },
+  sidebarForeground: {
+    label: "Sidebar text",
+    css: "--sidebar-foreground",
+    group: "sidebar",
+  },
+  sidebarAccent: {
+    label: "Sidebar hover",
+    css: "--sidebar-accent",
+    group: "sidebar",
+  },
+  sidebarBorder: {
+    label: "Sidebar border",
+    css: "--sidebar-border",
+    group: "sidebar",
   },
   mutedForeground: {
     label: "Secondary text",

@@ -115,6 +115,7 @@ export const COPY = {
 };
 export const TOKEN_GROUP_LABELS = {
   basics: "Basics",
+  sidebar: "Sidebar",
   text: "Text",
   status: "Status",
   code: "Code & git",

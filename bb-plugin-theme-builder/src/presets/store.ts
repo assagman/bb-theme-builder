@@ -8,6 +8,7 @@ import {
   revisionSchema,
   toDraft,
 } from "../theme/schema.ts";
+import { upgradePalettes } from "../theme/sidebar.ts";
 import { swatchOf } from "../theme/swatch.ts";
 import {
   INITIAL_REVISION,
@@ -41,7 +42,8 @@ export function createPresetStore(kv: PluginKvStorage) {
   async function get(id: string): Promise<ThemePreset | null> {
     const value = await kv.get(PRESET_PREFIX + idSchema.parse(id));
     if (value === undefined) return null;
-    const preset = presetSchema.parse(value);
+    // Presets saved before the sidebar colors existed gain bb's own sidebar mixes, so they keep their look and still validate.
+    const preset = presetSchema.parse(upgradePalettes(value));
     if (preset.id !== id) throw new Error(IDENTITY_ERROR);
     return preset;
   }

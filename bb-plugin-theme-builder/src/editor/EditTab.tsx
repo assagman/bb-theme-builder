@@ -1,3 +1,4 @@
+import type { SidebarAnchor } from "../theme/sidebar.ts";
 import type { Mode, ThemeDraft } from "../theme/tokens.ts";
 import { COPY } from "./copy.ts";
 import { TokenControls } from "./TokenControls.tsx";
@@ -11,11 +12,13 @@ export function EditTab({
   draft,
   mode,
   busy,
+  anchors,
   onChange,
 }: {
   draft: ThemeDraft;
   mode: Mode;
   busy: boolean;
+  anchors: Record<Mode, SidebarAnchor>;
   onChange: (draft: ThemeDraft) => void;
 }) {
   return (
@@ -24,7 +27,12 @@ export function EditTab({
         {COPY.editingMode} {COPY[mode]}
       </p>
       <fieldset disabled={busy} className="space-y-5">
-        <TokenControls draft={draft} mode={mode} onChange={onChange} />
+        <TokenControls
+          draft={draft}
+          mode={mode}
+          anchors={anchors}
+          onChange={onChange}
+        />
       </fieldset>
     </div>
   );

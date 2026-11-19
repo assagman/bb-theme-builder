@@ -14,7 +14,9 @@ and applies it.
   again, and use **Back** and **Forward** to compare. It needs no model and
   sends nothing to a provider.
 
-An isolated **Preview** shows the draft in both modes. In the action bar,
+An isolated **Preview** shows the draft as a whole bb window (sidebar, thread,
+and side panel) in both modes. The sidebar has its own colors, which you or
+the agent can change without changing the main screen. In the action bar,
 **Save** keeps the theme without changing appearance. **Apply** saves it and
 changes every bb window, preserving each window’s light/dark preference and
 favicon selection. A new theme asks for a name first. **More actions** has

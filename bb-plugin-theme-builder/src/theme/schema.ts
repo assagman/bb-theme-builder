@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { COLOR_PATTERN } from "./color.ts";
 import {
   CODE_FONTS,
   MAX_NAME_LENGTH,
@@ -12,7 +13,6 @@ import {
   UI_FONTS,
 } from "./tokens.ts";
 
-export const COLOR_PATTERN = /^#[0-9a-f]{6}$/;
 const OVERSIZE_MESSAGE = "Preset exceeds the allowed payload size";
 const UI_FONT_KEYS = Object.keys(UI_FONTS) as (keyof typeof UI_FONTS)[];
 const CODE_FONT_KEYS = Object.keys(CODE_FONTS) as (keyof typeof CODE_FONTS)[];

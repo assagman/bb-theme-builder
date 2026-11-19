@@ -8,6 +8,7 @@ import {
   TEXT_CONTRAST_MINIMUM,
   TEXT_PAIRS,
 } from "./contrast.ts";
+import { derivedSidebar } from "./sidebar.ts";
 import {
   MODES,
   type Mode,
@@ -174,9 +175,13 @@ function draftTokens(
   const status = (l: number, statusHue: number) => color(l, chroma, statusHue);
   // Starting labels are the mode's natural extreme; repair only moves them if the fill demands it.
   const onFill = mode === "light" ? WHITE : BLACK;
+  const canvas = color(ramp.canvas, tint, hue);
+  const ink = color(ramp.ink, tint * TINT_CHROMA_INK_FACTOR, hue);
   return {
-    canvas: color(ramp.canvas, tint, hue),
-    ink: color(ramp.ink, tint * TINT_CHROMA_INK_FACTOR, hue),
+    canvas,
+    ink,
+    // bb's own sidebar step off the canvas, so a random theme looks like bb would paint it without sidebar tokens.
+    ...derivedSidebar(canvas, ink, mode),
     primary: base.accent ?? color(ramp.primary, chroma, hue),
     primaryForeground: onFill,
     mutedForeground: color(ramp.muted, tint, hue),
