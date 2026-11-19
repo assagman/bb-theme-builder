@@ -2,7 +2,6 @@ import { useRpc } from "@get-bb/plugin-sdk/app";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GenerationSelection } from "../generation/contract.ts";
 import {
-  forgetSelection,
   loadRememberedSelection,
   rememberSelection,
 } from "../generation/selection-storage.ts";
@@ -12,8 +11,7 @@ import { LOG_PREFIX } from "./log.ts";
 
 /**
  * The model the AI tab will start a chat with: the remembered choice, else
- * the host default. A failed start clears the remembered choice (via `reset`)
- * so a removed provider is not retried forever.
+ * the host default. A remembered choice is kept until the user picks another.
  */
 export function useModelSelection() {
   const rpc = useRpc<typeof rpcContract>();
@@ -22,7 +20,7 @@ export function useModelSelection() {
   const mounted = useRef(true);
 
   const resolve = useCallback(async () => {
-    // A remembered choice is the user's own, so it is kept whatever the default is; only a failed start discards it.
+    // A remembered choice is the user's own, so it is kept whatever the default is; only the user's own pick replaces it.
     if (loadRememberedSelection() !== null) {
       setLoading(false);
       return;
@@ -54,14 +52,7 @@ export function useModelSelection() {
     setSelection(value);
     rememberSelection(value);
   }, []);
-  /** Called when a start fails so a stale model is replaced by the provider default instead of failing again. */
-  const reset = useCallback(() => {
-    forgetSelection();
-    setSelection(null);
-    void resolve();
-  }, [resolve]);
-
-  return { selection, loading, choose, reset };
+  return { selection, loading, choose };
 }
 
 /** What `useModelSelection` returns; held by the page so the choice survives tab switches. */

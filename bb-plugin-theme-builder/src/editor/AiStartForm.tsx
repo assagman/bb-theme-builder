@@ -21,6 +21,7 @@ export function AiStartForm({
   chat,
   model,
   busy,
+  valid,
   accent,
   onAccent,
   description,
@@ -29,6 +30,7 @@ export function AiStartForm({
   chat: Chat;
   model: ModelSelection;
   busy: boolean;
+  valid: boolean;
   accent: string;
   onAccent: (accent: string) => void;
   description: string;
@@ -40,20 +42,20 @@ export function AiStartForm({
   const descriptionId = useId();
   const helpId = useId();
   const errorId = useId();
+  const invalidId = useId();
   const reading = accentOrNull(accent);
   const canGenerate =
-    model.selection !== null && !busy && !starting && !reading.invalid;
+    model.selection !== null && !busy && !starting && !reading.invalid && valid;
 
   const generate = async () => {
     const parsed = descriptionSchema.safeParse(description);
     setDescriptionError(!parsed.success);
     if (model.selection === null || !parsed.success) return;
-    const started = await chat.start({
+    await chat.start({
       selection: model.selection,
       accent: reading.value,
       description: parsed.data,
     });
-    if (!started) model.reset();
   };
 
   return (
@@ -89,11 +91,17 @@ export function AiStartForm({
         <Button
           type="button"
           disabled={!canGenerate}
+          aria-describedby={valid ? undefined : invalidId}
           onClick={() => void generate()}
         >
           {starting ? COPY.aiStarting : COPY.aiGenerate}
         </Button>
       </div>
+      {!valid && (
+        <p id={invalidId} className="tb-hint tb-field-error">
+          {COPY.aiFixColours}
+        </p>
+      )}
     </>
   );
 }

@@ -22,12 +22,3 @@ export function rememberSelection(value: GenerationSelection): boolean {
     return false;
   }
 }
-
-/** Drops a stored model the host no longer offers or that failed to start, so the next load falls back to the provider default. */
-export function forgetSelection(): void {
-  try {
-    localStorage.removeItem(SELECTION_STORAGE_KEY);
-  } catch {
-    // Nothing stored that could be removed under a storage restriction.
-  }
-}

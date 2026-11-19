@@ -71,6 +71,7 @@ export function BuilderPage() {
     ai: () => (
       <AiTab
         busy={state.busy}
+        valid={valid}
         accent={accent}
         onAccent={setAccent}
         chat={chat}
@@ -223,6 +224,7 @@ export function BuilderPage() {
               message={state.message}
               error={state.error}
               invalid={!valid}
+              held={chat.held}
               onDiscardRestored={discard}
             />
           }

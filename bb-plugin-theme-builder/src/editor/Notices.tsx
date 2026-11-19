@@ -13,6 +13,7 @@ export function Notices({
   message,
   error,
   invalid,
+  held,
   onDiscardRestored,
 }: {
   busy: boolean;
@@ -20,6 +21,8 @@ export function Notices({
   message: string | null;
   error: string | null;
   invalid: boolean;
+  /** True when an agent reply was kept back to protect hand edits. */
+  held: boolean;
   onDiscardRestored: () => void;
 }) {
   return (
@@ -41,6 +44,7 @@ export function Notices({
           </Button>
         </p>
       )}
+      {held && <p role="status">{COPY.aiReplyHeld}</p>}
       {message !== null && <p role="status">{message}</p>}
       {error !== null && <p role="alert">{error}</p>}
       {invalid && <p role="alert">{COPY.invalid}</p>}

@@ -9,6 +9,8 @@ import type { ModelSelection } from "./model-selection.ts";
 /** Everything the page keeps alive across tab switches; the tab itself holds no chat state. */
 export type AiTabProps = {
   busy: boolean;
+  /** Whether the draft passes its schema; sending an invalid draft would fail at the server. */
+  valid: boolean;
   accent: string;
   onAccent: (accent: string) => void;
   chat: Chat;
@@ -61,6 +63,7 @@ export function AiTab(props: AiTabProps) {
           state={state}
           chat={chat}
           busy={busy}
+          valid={props.valid}
           message={props.message}
           onMessage={props.onMessage}
         />
@@ -69,6 +72,7 @@ export function AiTab(props: AiTabProps) {
           chat={chat}
           model={model}
           busy={busy}
+          valid={props.valid}
           accent={props.accent}
           onAccent={props.onAccent}
           description={props.description}

@@ -17,21 +17,24 @@ export function AiConversation({
   state,
   chat,
   busy,
+  valid,
   message,
   onMessage,
 }: {
   state: Extract<ChatState, { kind: "open" }>;
   chat: Chat;
   busy: boolean;
+  valid: boolean;
   message: string;
   onMessage: Dispatch<SetStateAction<string>>;
 }) {
   const messageId = useId();
+  const invalidId = useId();
   // The ref blocks a second Enter in the same tick; the state only drives the disabled look.
   const sendingRef = useRef(false);
   const [sending, setSending] = useState(false);
   const { running } = state;
-  const blocked = running || busy || sending;
+  const blocked = running || busy || sending || !valid;
 
   const send = async () => {
     const text = message;
@@ -115,6 +118,7 @@ export function AiConversation({
         <Button
           type="button"
           disabled={blocked || message.trim() === ""}
+          aria-describedby={valid ? undefined : invalidId}
           onClick={() => void send()}
         >
           {COPY.aiSend}
@@ -132,6 +136,11 @@ export function AiConversation({
           {COPY.aiNewChat}
         </Button>
       </div>
+      {!valid && (
+        <p id={invalidId} className="tb-hint tb-field-error">
+          {COPY.aiFixColours}
+        </p>
+      )}
     </>
   );
 }

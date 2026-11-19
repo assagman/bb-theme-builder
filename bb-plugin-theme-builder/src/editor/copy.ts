@@ -43,6 +43,9 @@ export const COPY = {
   aiNewChatConfirm:
     "End this chat and start a new one? The conversation is closed, and the theme you have now stays in the draft.",
   aiWorking: "The agent is working…",
+  aiReplyHeld:
+    "The agent replied while you were editing. Your edits are kept. Open the AI tab and choose Use this version to take its colours.",
+  aiFixColours: "Fix the colours marked on the Edit tab before you send.",
   randomizeIntro:
     "Pick an accent, or leave it blank, and get a full theme instantly. Roll again until one fits.",
   accentLabel: "Accent",

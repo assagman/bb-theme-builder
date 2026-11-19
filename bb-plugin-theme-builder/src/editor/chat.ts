@@ -11,7 +11,7 @@ import {
   POLL_INTERVAL_MS,
 } from "../generation/contract.ts";
 import type { rpcContract } from "../presets/contract.ts";
-import { paletteOf } from "../theme/schema.ts";
+import { paletteOf, samePalette } from "../theme/schema.ts";
 import type { ThemeDraft } from "../theme/tokens.ts";
 import { describeError } from "./describe-error.ts";
 import { LOG_PREFIX } from "./log.ts";
@@ -137,6 +137,10 @@ export function useChat() {
   const applied = useRef(0);
   const draftRef = useRef(draft);
   draftRef.current = draft;
+  // The palette last sent to the agent: a reply is applied only while the draft still equals it, so hand edits or another opened theme made during the turn are never overwritten.
+  const sentPalette = useRef<GeneratedPalette | null>(null);
+  // Set when a reply was kept back to protect such edits, so the page can tell the user where to find it.
+  const [held, setHeld] = useState(false);
   const sessionId = state.kind === "open" ? state.sessionId : null;
   const running = state.kind === "open" && state.running;
 
@@ -144,6 +148,11 @@ export function useChat() {
     (ticket: number, next: ChatState, replay: boolean) => {
       if (ticket < applied.current) return;
       applied.current = ticket;
+      // A closed or different session ends the held state, because the reply it refers to is no longer on offer. Checked first so a reply held below for a new session is not cleared in the same call.
+      if (next.kind === "none" || next.sessionId !== seen.current.sessionId) {
+        setHeld(false);
+        if (next.kind === "none") sentPalette.current = null;
+      }
       if (next.kind === "open") {
         const known =
           seen.current.sessionId === next.sessionId ? seen.current.mark : null;
@@ -151,8 +160,20 @@ export function useChat() {
           next.turns,
           replay ? known : lastMark(next.turns),
         );
-        if (palette !== null)
-          setDraft((value) => applyAgentPalette(value, palette));
+        if (palette !== null) {
+          const sent = sentPalette.current;
+          // No record means the page reloaded mid-turn: the restored draft is the one that was sent and the window is a single turn, so applying is safe.
+          if (sent === null || samePalette(draftRef.current, sent)) {
+            draftRef.current = applyAgentPalette(draftRef.current, palette);
+            // The draft now equals this reply, so a later reply in the same turn is compared against it rather than the stale sent palette.
+            sentPalette.current = paletteOf(draftRef.current);
+            setDraft((value) => applyAgentPalette(value, palette));
+            // An applied reply replaced the draft, so an earlier "edits are kept" notice would now be false.
+            setHeld(false);
+          } else {
+            setHeld(true);
+          }
+        }
       }
       seen.current = nextSeen(seen.current, next);
       setState(next);
@@ -261,6 +282,9 @@ export function useChat() {
   const start = useCallback(
     async (input: ChatStartRequest) => {
       setStarting(true);
+      setHeld(false);
+      const palette = paletteOf(draftRef.current);
+      sentPalette.current = structuredClone(palette);
       try {
         return await guarded("start", null, () =>
           rpc.call("chatStart", {
@@ -268,7 +292,7 @@ export function useChat() {
             selection: input.selection,
             accent: input.accent,
             description: input.description,
-            palette: paletteOf(draftRef.current),
+            palette,
           }),
         );
       } finally {
@@ -284,13 +308,16 @@ export function useChat() {
         setError(sessionId === null ? NO_SESSION_MESSAGE : EMPTY_MESSAGE);
         return Promise.resolve(false);
       }
+      setHeld(false);
       // The current palette always travels so the server can tell whether hand edits need a note to the agent.
+      const palette = paletteOf(draftRef.current);
+      sentPalette.current = structuredClone(palette);
       return guarded("send", sessionId, () =>
         rpc.call("chatSend", {
           sessionId,
           requestId: crypto.randomUUID(),
           text: message.data,
-          palette: paletteOf(draftRef.current),
+          palette,
         }),
       );
     },
@@ -304,16 +331,29 @@ export function useChat() {
   }, [rpc, guarded, sessionId]);
   const end = useCallback(() => {
     if (sessionId === null) return Promise.resolve(false);
+    setHeld(false);
     return guarded("end", sessionId, () => rpc.call("chatEnd", { sessionId }));
   }, [rpc, guarded, sessionId]);
   const checkpoint = useCallback(
     (turnIndex: number) => {
       const palette = checkpointPalette(state, turnIndex);
-      if (palette !== null)
-        setDraft((value) => applyAgentPalette(value, palette));
+      if (palette === null) return;
+      setHeld(false);
+      setDraft((value) => applyAgentPalette(value, palette));
     },
     [state, setDraft],
   );
 
-  return { state, error, loaded, starting, start, send, stop, end, checkpoint };
+  return {
+    state,
+    error,
+    loaded,
+    starting,
+    held,
+    start,
+    send,
+    stop,
+    end,
+    checkpoint,
+  };
 }
