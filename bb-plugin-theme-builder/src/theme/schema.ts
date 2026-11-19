@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { COLOR_PATTERN } from "./color.ts";
+import { ALPHA_COLOR_PATTERN, COLOR_PATTERN } from "./color.ts";
+import { EXTRA_KEYS } from "./extras.ts";
 import {
   CODE_FONTS,
   MAX_NAME_LENGTH,
@@ -20,6 +21,15 @@ export const colorSchema = z.string().regex(COLOR_PATTERN);
 export const idSchema = z.uuid();
 export const revisionSchema = z.number().int().min(1).max(MAX_REVISION);
 export const paletteSchema = z.record(z.enum(TOKEN_KEYS), colorSchema);
+// Partial: each extra token the user leaves alone is derived by bb, so it is simply absent.
+const extraPaletteSchema = z.partialRecord(
+  z.enum(EXTRA_KEYS),
+  z.string().regex(ALPHA_COLOR_PATTERN),
+);
+const extrasSchema = z.strictObject({
+  light: extraPaletteSchema,
+  dark: extraPaletteSchema,
+});
 const draftFields = {
   schemaVersion: z.literal(SCHEMA_VERSION),
   name: z
@@ -31,6 +41,8 @@ const draftFields = {
   dark: paletteSchema,
   uiFont: z.enum(UI_FONT_KEYS),
   codeFont: z.enum(CODE_FONT_KEYS),
+  // Optional so drafts, presets and checkpoints saved before extras existed still parse.
+  extras: extrasSchema.optional(),
 };
 const withinLimit = (value: unknown) =>
   new TextEncoder().encode(JSON.stringify(value)).byteLength <=
@@ -56,6 +68,7 @@ export function toDraft(preset: ThemePreset): ThemeDraft {
     dark: structuredClone(preset.dark),
     uiFont: preset.uiFont,
     codeFont: preset.codeFont,
+    ...(preset.extras ? { extras: structuredClone(preset.extras) } : {}),
   };
 }
 
@@ -83,6 +96,10 @@ function canonical(draft: ThemeDraft) {
     draft.codeFont,
     TOKEN_KEYS.map((key) => draft.light[key]),
     TOKEN_KEYS.map((key) => draft.dark[key]),
+    // null for "derived by bb", so an absent field and an empty one read the same.
+    MODES.map((mode) =>
+      EXTRA_KEYS.map((key) => draft.extras?.[mode][key] ?? null),
+    ),
   ]);
 }
 

@@ -313,3 +313,30 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* The --token name sits under the label so a user can match a row to a line of theme.css. */
+.tb-token-css {
+  display: block;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+/* Auto rows say so in words; the placeholder alone would read as an empty field. */
+.tb-auto {
+  min-width: var(--tb-badge-width);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.tb-reset {
+  min-width: var(--tb-badge-width);
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--foreground);
+  background: transparent;
+  border: 1px solid var(--input);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.tb-reset:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

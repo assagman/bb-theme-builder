@@ -1,3 +1,5 @@
+import type { ExtraGroup } from "../theme/extras.ts";
+
 export const COPY = {
   restored: "Restored unsaved changes to",
   restoredDeleted:
@@ -76,6 +78,14 @@ export const COPY = {
   editThis: "Edit this",
   refineWithAi: "Refine with AI",
   editingMode: "Editing colors for",
+  tokenSearchLabel: "Find a color",
+  tokenSearchPlaceholder: "Name or --token",
+  tokenSearchEmpty: "No color matches.",
+  extrasHint:
+    "Colors marked auto are bb’s own defaults, worked out from your palette. Type or pick a color to override one; #rrggbbaa adds transparency.",
+  autoMark: "auto",
+  resetAuto: "Auto",
+  resetAutoLabel: "Back to bb’s default:",
   actionBarLabel: "Theme actions",
   statusBuiltIn: "Built-in theme",
   statusPlugin: "Plugin theme",
@@ -98,7 +108,8 @@ export const COPY = {
   codeFont: "Code font",
   dirty: "Unsaved changes",
   saved: "Saved",
-  invalid: "Use a name and six-digit lowercase hex colors.",
+  invalid:
+    "Use a name and lowercase hex colors: #rrggbb, or #rrggbbaa for colors marked auto.",
   unconfirmed: "Reload the page to check the result.",
   defaultSuccess: "Default palette selected.",
   save: "Save",
@@ -135,6 +146,10 @@ export const TOKEN_GROUP_LABELS = {
   text: "Text",
   status: "Status",
   code: "Code & git",
-} as const;
+  surfaces: "Surfaces",
+  lines: "Borders & lines",
+  states: "Hover, selection & focus",
+  terminal: "Terminal",
+} as const satisfies Record<ExtraGroup, string>;
 export const SELECT_CLASS =
   "h-9 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring";

@@ -107,11 +107,22 @@ for good. Saved themes survive a server restart.
 
 ### Edit tab
 
-Colors are in groups: **Basics**, **Sidebar**, **Text**, **Status**, and
-**Code & git**. **Sidebar** sets the left side panel apart from the main
-screen: its background, text, row hover, and border. Themes saved before this
-group existed get bb's own sidebar colors, so they look the same as before.
-The **Code & git** group starts closed. Each color has a picker and a hex field.
+The tab lists every bb color token. Each row shows a plain name and the
+`--token` name that a `theme.css` file uses. **Find a color** filters the
+rows by either name. Colors are in groups: **Basics**, **Sidebar**, **Text**,
+**Status**, **Code & git**, **Surfaces**, **Borders & lines**, **Hover,
+selection & focus**, and **Terminal**. **Sidebar** sets the left side panel
+apart from the main screen: its background, text, row hover, and border.
+Themes saved before this group existed get bb's own sidebar colors, so they
+look the same as before. The last five groups start closed. Each color has a
+picker and a hex field.
+
+bb works out most tokens from the palette (for example, borders mix Text into
+Background). These rows say **auto** and show bb's value as a hint. Type or
+pick a color to override one; `#rrggbbaa` adds transparency. **Auto** gives
+the token back to bb. The theme file holds only the tokens you override, so
+the rest keep following the palette. A pill override replaces bb's gradient
+with one solid color.
 A badge on the color row shows its contrast ratio and a pass or fail mark.
 A group title shows how many of its colors fail. Contrast checks do not
 certify the accessibility of the whole application. Choose **Light** or
@@ -189,12 +200,13 @@ after **Use theme**, Restore leaves appearance unchanged and offers the
 explicit **Use bb default theme** fallback.
 
 **Export JSON** downloads the draft as shown. **Export CSS** downloads exactly
-the CSS a save would write. JSON contains schema version, name, palettes, and
-font keys; neither download includes server paths or timestamps in its
-content.
+the CSS a save would write. JSON contains schema version, name, palettes, font
+keys, and any token overrides; neither download includes server paths or
+timestamps in its content.
 
-Hex text fields offer a keyboard alternative to native color pickers. All
-colors are opaque six-digit hex; fonts are fixed local/system stacks whose
+Hex text fields offer a keyboard alternative to native color pickers. Palette
+colors are opaque six-digit hex; overrides of auto tokens may add an alpha
+pair; fonts are fixed local/system stacks whose
 availability varies by OS. No preview resources or fonts are downloaded. Below
 900 px of width the preview moves under the editor, and the page does not
 scroll sideways.
@@ -202,7 +214,7 @@ scroll sideways.
 Code syntax retains bb’s default `pierre-light` /`pierre-dark` fallback. The
 plain code sample demonstrates font choice; accent does not rewrite syntax
 colors. Diff/status controls set public semantic tokens. Syntax editing,
-terminal ANSI colors, CSS import, and plugin-package export are outside v1.
+CSS import, and plugin-package export are outside v1.
 
 ## Install and build
 

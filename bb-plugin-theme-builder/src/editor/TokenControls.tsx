@@ -1,17 +1,23 @@
+import { useState } from "react";
 import { Input } from "../../components/ui/input.tsx";
 import { COLOR_PATTERN } from "../theme/color.ts";
 import { type TokenContrast, tokenContrast } from "../theme/contrast.ts";
 import { NEUTRAL_PRESET } from "../theme/defaults.ts";
+import {
+  COLLAPSED_GROUPS,
+  type ExtraKey,
+  extrasOf,
+  resolveExtras,
+  visibleGroups,
+  withExtra,
+} from "../theme/extras.ts";
 import { editToken, type SidebarAnchor } from "../theme/sidebar.ts";
 import {
   CODE_FONTS,
   type Mode,
   type ThemeDraft,
   TOKEN_DEFINITIONS,
-  TOKEN_GROUP_COLLAPSED,
-  TOKEN_GROUPS,
   type TokenKey,
-  tokensInGroup,
   UI_FONTS,
 } from "../theme/tokens.ts";
 import {
@@ -22,6 +28,8 @@ import {
   groupFailures,
 } from "./contrast-badge.ts";
 import { COPY, SELECT_CLASS, TOKEN_GROUP_LABELS } from "./copy.ts";
+import { ExtraTokenRow } from "./ExtraTokenRow.tsx";
+import { TokenRow } from "./TokenRow.tsx";
 
 /**
  * Contrast readout for one color row. Owns the id that the row input's
@@ -78,44 +86,78 @@ export function TokenControls({
     const contrast = tokenContrast(draft[mode], key);
     const contrastId = `${mode}-${key}-contrast`;
     return (
-      <div className="tb-token" key={key}>
-        <label htmlFor={`${mode}-${key}`}>{token.label}</label>
-        <input
-          type="color"
-          value={valid ? color : NEUTRAL_PRESET[mode][key]}
-          aria-label={`${token.label} color`}
-          onChange={(event) => change(key, event.target.value)}
-        />
-        <Input
-          id={`${mode}-${key}`}
-          value={color}
-          aria-invalid={!valid}
-          spellCheck={false}
-          aria-describedby={contrast ? contrastId : undefined}
-          onChange={(event) => change(key, event.target.value.toLowerCase())}
-        />
-        {contrast && <ContrastBadge contrast={contrast} id={contrastId} />}
-      </div>
+      <TokenRow
+        key={key}
+        id={`${mode}-${key}`}
+        label={token.label}
+        css={token.css}
+        pickerValue={valid ? color : NEUTRAL_PRESET[mode][key]}
+        onPick={(hex) => change(key, hex)}
+        value={color}
+        invalid={!valid}
+        describedBy={contrast ? contrastId : undefined}
+        onType={(text) => change(key, text)}
+        trailing={
+          contrast && <ContrastBadge contrast={contrast} id={contrastId} />
+        }
+      />
     );
   };
+  const overrides = extrasOf(draft.extras, mode);
+  // One pass for all rows: rows that follow other extras read the same resolved table.
+  const resolved = resolveExtras(draft[mode], overrides, mode);
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLowerCase();
+  const changeExtra = (key: ExtraKey, value: string | undefined) =>
+    onChange({ ...draft, extras: withExtra(draft.extras, mode, key, value) });
+  const groups = visibleGroups(query);
   return (
     <div className="space-y-6">
-      {TOKEN_GROUPS.map((group) => {
-        const keys = tokensInGroup(group);
-        const failures = keys.filter(
+      <div className="space-y-2">
+        <label htmlFor={`${mode}-token-search`} className="block space-y-1">
+          <span>{COPY.tokenSearchLabel}</span>
+          <Input
+            id={`${mode}-token-search`}
+            type="search"
+            value={search}
+            placeholder={COPY.tokenSearchPlaceholder}
+            spellCheck={false}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+        <p className="tb-hint">{COPY.extrasHint}</p>
+      </div>
+      {groups.length === 0 && (
+        <p className="tb-hint">{COPY.tokenSearchEmpty}</p>
+      )}
+      {groups.map(({ group, core, extras }) => {
+        const failures = core.filter(
           (key) => tokenContrast(draft[mode], key)?.passes === false,
         ).length;
         return (
           <details
-            key={group}
-            open={group !== TOKEN_GROUP_COLLAPSED}
+            // Remounts when a search starts or ends, so a search opens every matching group and clearing it restores the defaults.
+            key={`${group}-${query === "" ? "browse" : "search"}`}
+            open={query !== "" || !COLLAPSED_GROUPS.has(group)}
             className="tb-group"
           >
             <summary className="cursor-pointer py-2 font-medium">
               {TOKEN_GROUP_LABELS[group]}
               {failures > 0 && groupFailures(failures)}
             </summary>
-            <div className="space-y-3 pt-3">{keys.map(row)}</div>
+            <div className="space-y-3 pt-3">
+              {core.map(row)}
+              {extras.map((key) => (
+                <ExtraTokenRow
+                  key={key}
+                  tokenKey={key}
+                  mode={mode}
+                  override={overrides[key]}
+                  resolved={resolved[key]}
+                  onChange={(value) => changeExtra(key, value)}
+                />
+              ))}
+            </div>
           </details>
         );
       })}

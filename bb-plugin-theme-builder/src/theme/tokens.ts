@@ -1,3 +1,5 @@
+import type { ThemeExtras } from "./extras.ts";
+
 export const SCHEMA_VERSION = 1;
 export const MAX_PRESETS = 100;
 export const MAX_NAME_LENGTH = 80;
@@ -142,6 +144,8 @@ export type ThemeDraft = {
   dark: PaletteTokens;
   uiFont: keyof typeof UI_FONTS;
   codeFont: keyof typeof CODE_FONTS;
+  /** Overrides of bb's derived color tokens; absent when the theme keeps all of bb's own. */
+  extras?: ThemeExtras;
 };
 export type ThemePreset = ThemeDraft & {
   id: string;

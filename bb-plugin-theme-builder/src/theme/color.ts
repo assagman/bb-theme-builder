@@ -2,6 +2,13 @@ export type Oklch = { l: number; c: number; h: number };
 
 /** The only color form themes store: lowercase `#rrggbb`, so equality checks never see two spellings of one color. */
 export const COLOR_PATTERN = /^#[0-9a-f]{6}$/;
+/**
+ * `#rrggbb` with an optional alpha pair, for tokens bb paints translucent
+ * (hover, selection, scrims); lowercase only, like COLOR_PATTERN.
+ */
+export const ALPHA_COLOR_PATTERN = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/;
+// Length of `#rrggbb`: where an alpha pair starts.
+const OPAQUE_HEX_LENGTH = 7;
 const HEX_RADIX = 16;
 const CHANNEL_MAX = 255;
 const HEX_CHANNEL_DIGITS = 2;
@@ -165,4 +172,38 @@ export function oklchToHex(color: Oklch): string {
       return encoded.toString(HEX_RADIX).padStart(HEX_CHANNEL_DIGITS, "0");
     })
     .join("")}`;
+}
+
+/** `#rrggbb` part of a color, because the OKLab math and the native picker ignore alpha. */
+export const opaquePart = (hex: string): string =>
+  hex.slice(0, OPAQUE_HEX_LENGTH);
+/** The alpha pair of a color, or "" when it is opaque; kept when a picker changes only the color. */
+export const alphaPart = (hex: string): string => hex.slice(OPAQUE_HEX_LENGTH);
+
+/** The opacity byte of CSS `color-mix(…, color share, transparent)`, appended to the color. */
+export function withAlpha(hex: string, share: number): string {
+  const byte = Math.round(share * CHANNEL_MAX)
+    .toString(HEX_RADIX)
+    .padStart(HEX_CHANNEL_DIGITS, "0");
+  return `${opaquePart(hex)}${byte}`;
+}
+
+/** OKLCH as OKLab axes; mixing in OKLab interpolates these straight lines, not hue angles. */
+function toLab({ l, c, h }: Oklch): Vec3 {
+  const radians = (h * Math.PI) / HALF_TURN;
+  return [l, c * Math.cos(radians), c * Math.sin(radians)];
+}
+
+/** Same as CSS `color-mix(in oklab, top share, base)`, for the tokens bb mixes in OKLab rather than OKLCH. */
+export function mixOklab(top: string, base: string, share: number): string {
+  const a = toLab(hexToOklch(top));
+  const b = toLab(hexToOklch(base));
+  const [l, x, y] = b.map(
+    (channel, index) => channel + (a[index] - channel) * share,
+  );
+  return oklchToHex({
+    l,
+    c: Math.hypot(x, y),
+    h: wrapHue((Math.atan2(y, x) * HALF_TURN) / Math.PI),
+  });
 }

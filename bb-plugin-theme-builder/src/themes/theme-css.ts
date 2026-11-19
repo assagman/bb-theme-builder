@@ -3,13 +3,28 @@
  * copy of that CSS. Pure, so the page (preview, export) and the server
  * (Overwrite, Save as new) build byte-identical copies.
  */
+
+import { ALPHA_COLOR_PATTERN, COLOR_PATTERN } from "../theme/color.ts";
 import {
   FONT_MONO,
   FONT_SANS,
   generateCss,
+  LIGHT_ROOT,
+  MODE_SELECTORS,
   SIDEBAR_HOVER_TEXT,
 } from "../theme/css.ts";
 import { NEUTRAL_PRESET } from "../theme/defaults.ts";
+import {
+  autoHoverText,
+  EXTRA_DEFINITIONS,
+  EXTRA_KEYS,
+  type ExtraKey,
+  type ExtraTokens,
+  extrasOf,
+  isAutoHoverText,
+  resolveExtras,
+  type ThemeExtras,
+} from "../theme/extras.ts";
 import { derivedSidebar } from "../theme/sidebar.ts";
 import {
   CODE_FONTS,
@@ -25,17 +40,6 @@ import {
 
 /** Marks the one block the builder owns; everything else in the file is the theme author's CSS, kept verbatim. */
 export const EDITS_MARKER = "/* theme-builder:edits */";
-/**
- * Root while bb is in light mode. bb puts `.dark` on the root in dark mode,
- * so a light edit written here can never override the theme's own dark
- * value. `:where` adds no specificity, so this ties with `:root`, `.light`
- * and `.dark` and "the later rule wins" holds for bb and for this reader.
- */
-const LIGHT_ROOT = ":root:where(:not(.dark))";
-const MODE_SELECTORS: Record<Mode, string> = {
-  light: `${LIGHT_ROOT}, .light`,
-  dark: ".dark",
-};
 const ROOT_SELECTOR = ":root";
 const MODE_CLASS: Record<string, Mode> = {
   ".light": "light",
@@ -49,8 +53,8 @@ const IMPORT_RULE = /@import\b[^;]*;?/gi;
 // `</` inside a srcdoc <style> could close the element; `\/` is the same character to CSS.
 const STYLE_CLOSE = /<\//g;
 const STYLE_CLOSE_SAFE = "<\\/";
-const SHORT_HEX = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/;
-const LONG_HEX = /^#[0-9a-f]{6}$/;
+// Three or four digits (`#rgb`, `#rgba`); each one is doubled to the long form before the pattern check.
+const SHORT_HEX = /^#[0-9a-f]{3,4}$/;
 const WHITESPACE = /\s+/g;
 const NEWLINE = "\n";
 const CRLF = /\r\n?/g;
@@ -58,7 +62,8 @@ const PARAGRAPH = "\n\n";
 const INDENT = "  ";
 const RULE_CLOSE = "}";
 // One line of an edits rule exactly as buildCopyCss writes it; sticky so it is matched in place, never searched for.
-const EDITS_LINE = / {2}(--[a-z-]+): ([^;\n{}]+);\n/y;
+// Digits too: the terminal colors are --ansi-0 … --ansi-15.
+const EDITS_LINE = / {2}(--[a-z0-9-]+): ([^;\n{}]+);\n/y;
 const QUOTES = new Set(['"', "'"]);
 const ESCAPE = "\\";
 // The base parse only feeds the token diff, so its name is never read.
@@ -66,12 +71,20 @@ const BASE_NAME = "";
 const TOKEN_BY_CSS = new Map<string, TokenKey>(
   TOKEN_KEYS.map((key) => [TOKEN_DEFINITIONS[key].css, key]),
 );
-const OUR_VARS = [...TOKEN_BY_CSS.keys(), FONT_SANS, FONT_MONO];
+const EXTRA_BY_CSS = new Map<string, ExtraKey>(
+  EXTRA_KEYS.map((key) => [EXTRA_DEFINITIONS[key].css, key]),
+);
+const OUR_VARS = [
+  ...TOKEN_BY_CSS.keys(),
+  ...EXTRA_BY_CSS.keys(),
+  FONT_SANS,
+  FONT_MONO,
+];
 // A declaration of one of our variables anywhere in a block, used to spot rules that style parts directly.
 const OUR_DECLARATION = new RegExp(
   `(?:^|[;{\\s])(?:${OUR_VARS.map((name) => name.replace(/-/g, "\\-")).join("|")})\\s*:`,
 );
-const COLOR_VARS = new Set([...TOKEN_BY_CSS.keys(), SIDEBAR_HOVER_TEXT]);
+const COLOR_VARS = new Set(TOKEN_BY_CSS.keys());
 // Font values the writer can emit, so only its own font lines count as part of an edits block.
 const FONT_STACKS = new Map<string, Set<string>>([
   [FONT_SANS, new Set(Object.values(UI_FONTS).map((font) => font.stack))],
@@ -84,7 +97,10 @@ type Rule = { prelude: string; body: string };
  * read. A key absent here is inherited (from Neutral or the derived sidebar),
  * including one whose last value is a form the editor cannot read.
  */
-type ModeValues = Record<Mode, Map<TokenKey, string>>;
+type ModeValues = Record<
+  Mode,
+  { core: Map<TokenKey, string>; extras: Map<ExtraKey, string> }
+>;
 type Fonts = { sans: string | null; mono: string | null };
 /** A theme read into the editor's model plus whether some of it escapes that model. */
 export type ParsedTheme = { draft: ThemeDraft; scopedOverrides: boolean };
@@ -198,14 +214,17 @@ function declarations(body: string): {
   return { values, nested };
 }
 
-/** Lowercase six-digit hex, or null for any other value form (names, functions, variables). */
-function hexColor(value: string): string | null {
+/**
+ * Lowercase long hex when the value matches `pattern` (core tokens take six
+ * digits; extras may add alpha), or null for any other form (names,
+ * functions, variables) that the editor cannot read.
+ */
+function hexColor(value: string, pattern: RegExp): string | null {
   const color = value.toLowerCase();
-  if (LONG_HEX.test(color)) return color;
-  const short = SHORT_HEX.exec(color);
-  return short === null
-    ? null
-    : `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`;
+  const long = SHORT_HEX.test(color)
+    ? `#${[...color.slice(1)].map((digit) => digit + digit).join("")}`
+    : color;
+  return pattern.test(long) ? long : null;
 }
 
 /** Modes a selector list paints: `:root` is both, `.light`/`.dark` one each; anything else is not a palette rule. */
@@ -250,6 +269,21 @@ function fillPalette(parsed: Map<TokenKey, string>, mode: Mode): PaletteTokens {
   };
 }
 
+/** Records one parsed value per mode; a later value the editor cannot read hides an earlier hex, so the key is not counted as set there. */
+function setParsed<K extends "core" | "extras">(
+  palette: ModeValues,
+  modes: Mode[],
+  kind: K,
+  key: K extends "core" ? TokenKey : ExtraKey,
+  color: string | null,
+) {
+  for (const mode of modes) {
+    const values = palette[mode][kind] as Map<typeof key, string>;
+    if (color === null) values.delete(key);
+    else values.set(key, color);
+  }
+}
+
 /** Applies one palette rule's declarations in source order, so later rules win as they do in the browser. */
 function readPaletteRule(
   values: [string, string][],
@@ -260,15 +294,46 @@ function readPaletteRule(
   for (const [name, value] of values) {
     if (name === FONT_SANS) fonts.sans = value;
     else if (name === FONT_MONO) fonts.mono = value;
-    const key = TOKEN_BY_CSS.get(name);
-    if (key === undefined) continue;
-    const color = hexColor(value);
-    for (const mode of modes) {
-      // A later value the editor cannot read hides an earlier hex in that mode, so the key is not counted as set there.
-      if (color === null) palette[mode].delete(key);
-      else palette[mode].set(key, color);
+    const core = TOKEN_BY_CSS.get(name);
+    const extra = EXTRA_BY_CSS.get(name);
+    if (core !== undefined)
+      setParsed(palette, modes, "core", core, hexColor(value, COLOR_PATTERN));
+    else if (extra !== undefined)
+      setParsed(
+        palette,
+        modes,
+        "extras",
+        extra,
+        hexColor(value, ALPHA_COLOR_PATTERN),
+      );
+  }
+}
+
+/**
+ * The extra tokens a theme sets, per mode. A Sidebar hover text equal to
+ * Sidebar text is the line the writer adds on its own, not a user choice, so
+ * it is left to follow Sidebar text instead of being pinned.
+ */
+function readExtras(
+  palette: ModeValues,
+  filled: Record<Mode, PaletteTokens>,
+): { extras?: ThemeExtras } {
+  const extras: ThemeExtras = { light: {}, dark: {} };
+  let count = 0;
+  for (const mode of MODES) {
+    for (const key of EXTRA_KEYS) {
+      const value = palette[mode].extras.get(key);
+      if (value === undefined) continue;
+      if (
+        key === "sidebarAccentForeground" &&
+        isAutoHoverText(filled[mode], value)
+      )
+        continue;
+      extras[mode][key] = value;
+      count += 1;
     }
   }
+  return count === 0 ? {} : { extras };
 }
 
 /**
@@ -278,7 +343,10 @@ function readPaletteRule(
  * cannot follow it.
  */
 export function parseThemeCss(css: string, name: string): ParsedTheme {
-  const palette: ModeValues = { light: new Map(), dark: new Map() };
+  const palette: ModeValues = {
+    light: { core: new Map(), extras: new Map() },
+    dark: { core: new Map(), extras: new Map() },
+  };
   const fonts: Fonts = { sans: null, mono: null };
   let scopedOverrides = false;
   for (const rule of topLevelRules(stripComments(css))) {
@@ -291,12 +359,16 @@ export function parseThemeCss(css: string, name: string): ParsedTheme {
     readPaletteRule(values, modes, palette, fonts);
     scopedOverrides ||= nested.some((block) => OUR_DECLARATION.test(block));
   }
+  const filled = {
+    light: fillPalette(palette.light.core, "light"),
+    dark: fillPalette(palette.dark.core, "dark"),
+  };
   return {
     draft: {
       ...NEUTRAL_PRESET,
       name,
-      light: fillPalette(palette.light, "light"),
-      dark: fillPalette(palette.dark, "dark"),
+      ...filled,
+      ...readExtras(palette, filled),
       uiFont: fontKey(fonts.sans, UI_FONTS),
       codeFont: fontKey(fonts.mono, CODE_FONTS),
     },
@@ -306,7 +378,8 @@ export function parseThemeCss(css: string, name: string): ParsedTheme {
 
 /** True for a declaration buildCopyCss itself writes: one of our colours as hex, or a font stack it offers. */
 function writerDeclaration(name: string, value: string): boolean {
-  if (COLOR_VARS.has(name)) return LONG_HEX.test(value);
+  if (COLOR_VARS.has(name)) return COLOR_PATTERN.test(value);
+  if (EXTRA_BY_CSS.has(name)) return ALPHA_COLOR_PATTERN.test(value);
   return FONT_STACKS.get(name)?.has(value) ?? false;
 }
 
@@ -385,6 +458,26 @@ function copySource(css: string): CopySource {
   return lastSource;
 }
 
+/**
+ * Extra-token lines of one mode's edits block: each override that differs
+ * from the theme's own. An override the user cleared while the theme itself
+ * sets the token cannot be removed by an appended block, so it is written as
+ * the color bb derives, which is what the editor shows.
+ */
+function extraLines(
+  base: ThemeDraft,
+  draft: ThemeDraft,
+  mode: Mode,
+  overrides: ExtraTokens,
+): string[] {
+  const own = extrasOf(base.extras, mode);
+  // resolveExtras returns the override when one is set, else the derived color.
+  const resolved = resolveExtras(draft[mode], overrides, mode);
+  return EXTRA_KEYS.filter((key) => overrides[key] !== own[key]).map(
+    (key) => `${INDENT}${EXTRA_DEFINITIONS[key].css}: ${resolved[key]};`,
+  );
+}
+
 /** One mode's lines of the edits block: only tokens whose value in that mode differs from the theme's own. */
 function modeLines(
   base: ThemeDraft,
@@ -396,11 +489,19 @@ function modeLines(
   const lines = keys.map(
     (key) => `${INDENT}${TOKEN_DEFINITIONS[key].css}: ${draft[mode][key]};`,
   );
-  if (keys.includes("sidebarForeground"))
-    lines.push(
-      `${INDENT}${SIDEBAR_HOVER_TEXT}: ${draft[mode].sidebarForeground};`,
-    );
-  return [...lines, ...fontLines];
+  const overrides = extrasOf(draft.extras, mode);
+  const extras = extraLines(base, draft, mode, overrides);
+  const hover = autoHoverText(draft[mode], overrides);
+  const hoverLine = `${INDENT}${SIDEBAR_HOVER_TEXT}: `;
+  // extraLines already writes the hover text when a theme-owned pin was cleared; one line is enough.
+  const hoverWritten = extras.some((line) => line.startsWith(hoverLine));
+  if (
+    keys.includes("sidebarForeground") &&
+    hover !== undefined &&
+    !hoverWritten
+  )
+    lines.push(`${hoverLine}${hover};`);
+  return [...lines, ...extras, ...fontLines];
 }
 
 /**

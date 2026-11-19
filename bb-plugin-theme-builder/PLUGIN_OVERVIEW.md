@@ -8,8 +8,10 @@ copy. Three tabs change the copy, and one action bar saves it.
   tweak it. It uses your chosen bb provider and model. Normal provider usage
   applies, each answer has a three-minute deadline, and the archived thread
   stays in bb’s history.
-- **Edit**: change colors and local fonts by hand. Colors are in groups, and
-  each color shows its contrast ratio next to it.
+- **Edit**: change every bb color token and local fonts by hand. Rows show a
+  plain name and the `--token` name, and a search finds either. Tokens bb
+  works out from the palette say **auto** until you override them. Palette
+  colors show their contrast ratio next to them.
 - **Randomize**: pick an accent, or none, and get a full theme at once. Roll
   again, and use **Back** and **Forward** to compare. It needs no model and
   sends nothing to a provider.
