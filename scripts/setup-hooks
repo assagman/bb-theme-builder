@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Clone-local forwarding keeps shared policy versioned without changing Git settings.
+set -euo pipefail
+readonly hook_names=(pre-commit pre-merge-commit prepare-commit-msg commit-msg pre-push)
+readonly marker='# Repository hook forwarder'
+root=$(git rev-parse --show-toplevel)
+configured=$(git config --get core.hooksPath || true)
+if [[ -n "$configured" ]]; then
+	printf 'Hook setup refused: core.hooksPath is already set. Preserve and review that setup.\n' >&2
+	exit 1
+fi
+hooks=$(git rev-parse --path-format=absolute --git-path hooks)
+mkdir -p "$hooks"
+# Validate every destination before writing so an existing owner hook is never replaced.
+for name in "${hook_names[@]}"; do
+	target="$hooks/$name"
+	if [[ -e "$target" || -L "$target" ]]; then
+		if [[ -L "$target" ]] || ! grep -Fxq "$marker" "$target"; then
+			printf 'Hook setup refused: existing hook %s needs manual integration.\n' "$name" >&2
+			exit 1
+		fi
+	fi
+	[[ -x "$root/.githooks/$name" ]] || {
+		printf 'Missing executable policy: %s\n' "$name" >&2
+		exit 1
+	}
+done
+for name in "${hook_names[@]}"; do
+	# shellcheck disable=SC2016 # The forwarder must resolve its own worktree when Git invokes it.
+	printf '%s\n' '#!/usr/bin/env bash' "$marker" 'set -euo pipefail' 'root=$(git rev-parse --show-toplevel)' "exec \"\$root/.githooks/$name\" \"\$@\"" >"$hooks/$name"
+	chmod +x "$hooks/$name"
+done
+printf 'Installed %s hook forwarders. Git configuration unchanged.\n' "${#hook_names[@]}"

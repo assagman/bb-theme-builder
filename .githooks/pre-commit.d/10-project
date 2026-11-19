@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Check indexed content so partial staging cannot hide a formatting or lint failure.
+set -euo pipefail
+# shellcheck source=.githooks/lib/helpers.sh
+. "${HOOK_HELPERS:?run through the repository pre-commit hook}"
+readonly check_timeout=60
+root=$(git rev-parse --show-toplevel)
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/theme-staged.XXXXXX")
+cleanup() {
+	# Only this run's indexed copy is temporary; list it before removal.
+	if [[ -d "$scratch" && "${scratch##*/}" == theme-staged.* ]]; then
+		printf 'Removing staged verification copy: %s\n' "$scratch"
+		ls -A "$scratch"
+		rm -r -- "$scratch"
+	fi
+}
+trap cleanup EXIT
+# Reject symlinks before extraction so a staged file cannot redirect a scanner outside this copy.
+staged_git ls-files --stage >"$scratch/index-modes"
+if grep -q '^120000 ' "$scratch/index-modes"; then
+	printf 'Staged verification refuses symlinks.\n' >&2
+	exit 1
+fi
+staged_git checkout-index --all --prefix="$scratch/"
+[[ -x "$root/bb-plugin-theme-builder/node_modules/.bin/biome" ]] || {
+	printf 'Missing local Biome; run the locked dependency install.\n' >&2
+	exit 1
+}
+run_step 'staged format and lint' "$check_timeout" "$root/bb-plugin-theme-builder/node_modules/.bin/biome" check --vcs-enabled=false --error-on-warnings --config-path="$scratch/bb-plugin-theme-builder/biome.json" "$scratch/bb-plugin-theme-builder" "$scratch/scripts/verify-test-environment.mjs"

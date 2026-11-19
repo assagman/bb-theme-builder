@@ -1,0 +1,2 @@
+length=320
+length_reason=Lizard counts nested closures and formatted JSX inside the owning function. The editor hook keeps one transaction owner across remounts; cyclomatic complexity retains the default limit of 15.

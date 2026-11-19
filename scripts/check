@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# A single fail-closed entry point keeps local validation and push validation identical.
+set -euo pipefail
+readonly local_timeout=120
+readonly network_timeout=180
+readonly browser_timeout=180
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+# shellcheck source=.githooks/lib/helpers.sh
+. "$root/.githooks/lib/helpers.sh"
+: "${BB_DATA_DIR:?Set BB_DATA_DIR to the disposable BB data directory}"
+: "${BB_SERVER_URL:?Set BB_SERVER_URL to the disposable BB URL}"
+: "${BB_HOST_DAEMON_PORT:?Set BB_HOST_DAEMON_PORT to the disposable daemon port}"
+: "${BB_THEME_TEST_CDP:?Set BB_THEME_TEST_CDP to the isolated browser websocket}"
+: "${BB_THEME_TEST_ARTIFACTS:?Set a fresh temporary browser evidence directory}"
+export BB_THEME_TEST_URL="$BB_SERVER_URL"
+export BB_THEME_TEST_DATA_DIR="$BB_DATA_DIR"
+export BB_THEME_TEST_DAEMON_PORT="$BB_HOST_DAEMON_PORT"
+run_step 'disposable runtime identity' "$local_timeout" node scripts/verify-test-environment.mjs
+cd "$root/bb-plugin-theme-builder"
+# Only disposable at_sha worktrees need installation; never replace a clone's dependencies.
+if [[ ! -d node_modules ]]; then
+	run_step 'locked dependencies' "$network_timeout" npm ci --ignore-scripts
+fi
+run_step 'format and lint' "$local_timeout" npm run lint
+run_step 'typecheck' "$local_timeout" npm run typecheck
+run_step 'tests' "$local_timeout" npm test
+run_step 'duplication' "$local_timeout" npm run duplicates
+run_step 'dependency audit' "$network_timeout" npm audit
+run_step 'build' "$local_timeout" npm run build
+cd "$root"
+run_step 'script format and lint' "$local_timeout" bb-plugin-theme-builder/node_modules/.bin/biome check --config-path=bb-plugin-theme-builder/biome.json scripts/verify-test-environment.mjs --error-on-warnings
+run_step 'shell analysis' "$local_timeout" shellcheck -x scripts/setup-hooks scripts/check .githooks/pre-commit.d/* .githooks/pre-push.d/*
+run_step 'shell format' "$local_timeout" shfmt -d scripts/setup-hooks scripts/check .githooks/pre-commit.d .githooks/pre-push.d
+run_step 'static analysis' "$local_timeout" semgrep scan --config .githooks/lib/semgrep --error --metrics off --disable-version-check --no-git-ignore bb-plugin-theme-builder/src bb-plugin-theme-builder/server.ts bb-plugin-theme-builder/app.tsx
+run_step 'markdown' "$local_timeout" markdownlint-cli2 --config .githooks/lib/markdownlint.jsonc README.md bb-plugin-theme-builder/README.md bb-plugin-theme-builder/PLUGIN_OVERVIEW.md
+# The existing journey verifies the server's canonical data root before any appearance mutation.
+run_step 'isolated plugin install' "$local_timeout" bb plugin install "$root/bb-plugin-theme-builder" --yes
+cd "$root/bb-plugin-theme-builder"
+run_step 'browser smoke' "$browser_timeout" npm run smoke
+printf 'All project checks passed.\n'
