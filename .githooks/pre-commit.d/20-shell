@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Check formatting and lint of staged repo-owned shell scripts against the commit index.
+#
+# Why: pre-commit.d/10-project checks TypeScript/JS/CSS/JSON via Biome, while
+# the shared template checks Markdown and secrets. This script closes the shell
+# gap at commit time so defects in scripts/check, scripts/disposable-runtime,
+# scripts/lib/*.sh, or .githooks/*.d/* fail early rather than waiting for push.
+# Shared template files under .githooks/ are excluded here. Rejects
+# staged shell symlinks and fails closed on missing pinned tools.
+set -euo pipefail
+
+# shellcheck source=.githooks/lib/helpers.sh
+. "${HOOK_HELPERS:?run through the repository pre-commit hook}"
+
+# Bound every check so a hung linter stops the commit instead of hanging.
+readonly CHECK_TIMEOUT_SECONDS=60
+# Prefix verified before cleanup deletes this run's temporary index export.
+readonly SCRATCH_PREFIX='theme-shell-staged'
+
+repo_root="$(cd -- "$(git rev-parse --show-toplevel)" && pwd -P)"
+cd -- "$repo_root"
+
+# shellcheck source=scripts/lib/shell-tools.sh
+. "$repo_root/scripts/lib/shell-tools.sh"
+
+# Install signal traps so interruptions clean scratch and preserve exit status.
+install_signal_traps() {
+	trap 'exit "$SIGNAL_STATUS_HUP"' HUP
+	trap 'exit "$SIGNAL_STATUS_INT"' INT
+	trap 'exit "$SIGNAL_STATUS_TERM"' TERM
+}
+
+# Run one pre-commit check under a timeout and restore traps cleared by run_with_timeout.
+run_commit_step() {
+	local name="$1" rc=0
+	shift
+	run_with_timeout "$CHECK_TIMEOUT_SECONDS" "$@" || rc=$?
+	install_signal_traps
+	if [ "$rc" -eq "$TIMEOUT_EXIT_STATUS" ]; then
+		printf 'pre-commit: step %s timed out (limit %ss)\n' "$name" "$CHECK_TIMEOUT_SECONDS" >&2
+	fi
+	return "$rc"
+}
+
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/${SCRATCH_PREFIX}.XXXXXX")
+# Remove only this run's scratch directory on exit without clobbering $?.
+# shellcheck disable=SC2329  # Invoked via EXIT trap.
+cleanup() {
+	local rc=$?
+	if [[ -d "$scratch" && "${scratch##*/}" == "${SCRATCH_PREFIX}."* ]]; then
+		rm -rf -- "$scratch"
+	fi
+	return "$rc"
+}
+trap cleanup EXIT
+install_signal_traps
+
+raw_diff="$scratch/diff-raw"
+staged_git diff --cached --raw -z --no-renames --diff-filter=ACMT >"$raw_diff"
+
+shell_files=()
+while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+	is_repo_shell_path "$path" || continue
+	# --raw meta: ":<old mode> <new mode> <old sha> <new sha> <status>"
+	read -r _ mode _ <<<"$meta"
+	if [ "$mode" = "$SHELL_SYMLINK_MODE" ]; then
+		printf 'pre-commit: staged shell symlink is not allowed: %s\n' "$path" >&2
+		exit 1
+	fi
+	if [[ "$SHELL_REGULAR_MODES" == *" $mode "* ]]; then
+		shell_files+=("$path")
+	fi
+done <"$raw_diff"
+
+[ "${#shell_files[@]}" -gt 0 ] || exit 0
+
+activate_pinned_tools "$repo_root" "$repo_root" pre-commit shellcheck shfmt
+
+# Export every regular indexed shell/support file (.githooks/, scripts/, *.sh)
+# once so shellcheck -x resolves sourced helpers identically to scripts/check.
+stage_support="$scratch/support-stage"
+staged_git ls-files --stage -z >"$stage_support"
+export_files=()
+while IFS= read -r -d '' entry; do
+	path="${entry#*$'\t'}"
+	mode="${entry%% *}"
+	case "$path" in
+	.githooks/* | scripts/* | *.[Ss][Hh]) ;;
+	*) continue ;;
+	esac
+	if [ "$mode" = "$SHELL_SYMLINK_MODE" ]; then
+		if is_repo_shell_path "$path" || [ "$path" = '.githooks/lib/helpers.sh' ]; then
+			printf 'pre-commit: indexed shell symlink is not allowed: %s\n' "$path" >&2
+			exit 1
+		fi
+		continue
+	fi
+	if [[ "$SHELL_REGULAR_MODES" == *" $mode "* ]]; then
+		export_files+=("$path")
+	fi
+done <"$stage_support"
+
+if [ "${#export_files[@]}" -eq 0 ]; then
+	printf 'pre-commit: staged shell files missing from index export\n' >&2
+	exit 1
+fi
+
+tree="$scratch/tree"
+mkdir -p -- "$tree"
+printf '%s\0' "${export_files[@]}" | staged_git checkout-index -f -z --stdin --prefix="$tree/"
+cd -- "$tree"
+
+run_commit_step 'staged shell lint' shellcheck -x -- "${shell_files[@]}"
+run_commit_step 'staged shell format' shfmt -d -- "${shell_files[@]}"

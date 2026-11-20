@@ -4,10 +4,18 @@ set -euo pipefail
 readonly local_timeout=120
 readonly network_timeout=180
 readonly browser_timeout=180
-root=$(git rev-parse --show-toplevel)
-cd "$root"
+# Tools pinned in mise.toml; resolved from CHECK_TOOL_ROOT without network auto-install.
+readonly pinned_tools=(node shellcheck shfmt markdownlint-cli2)
+root="$(cd -- "$(git rev-parse --show-toplevel)" && pwd -P)"
+tool_root="$(cd -- "${CHECK_TOOL_ROOT:-$root}" && pwd -P)"
+cd -- "$root"
 # shellcheck source=.githooks/lib/helpers.sh
 . "$root/.githooks/lib/helpers.sh"
+# shellcheck source=scripts/lib/shell-tools.sh
+. "$root/scripts/lib/shell-tools.sh"
+
+activate_pinned_tools "$tool_root" "$root" scripts/check "${pinned_tools[@]}"
+
 # With no runtime configured, check against a throwaway one, so a push or a
 # manual run needs no setup and can never reach the bb in daily use.
 if [[ -z "${BB_THEME_TEST_CDP:-}" ]]; then
@@ -35,8 +43,41 @@ run_step 'dependency audit' "$network_timeout" npm audit
 run_step 'build' "$local_timeout" npm run build
 cd "$root"
 run_step 'script format and lint' "$local_timeout" bb-plugin-theme-builder/node_modules/.bin/biome check --config-path=bb-plugin-theme-builder/biome.json scripts/verify-test-environment.mjs --error-on-warnings
-run_step 'shell analysis' "$local_timeout" shellcheck -x scripts/setup-hooks scripts/check scripts/disposable-runtime .githooks/pre-commit.d/* .githooks/pre-push.d/*
-run_step 'shell format' "$local_timeout" shfmt -d scripts/setup-hooks scripts/check scripts/disposable-runtime .githooks/pre-commit.d .githooks/pre-push.d
+# Collect tracked repo-owned shell scripts fail-closed using the same predicate as pre-commit.d/20-shell.
+readonly STAGE_LIST_PREFIX='theme-check-stage'
+stage_list=''
+# shellcheck disable=SC2329  # Invoked via EXIT trap.
+cleanup_stage_list() {
+	local rc=$?
+	if [[ -n "$stage_list" && -f "$stage_list" && "${stage_list##*/}" == "${STAGE_LIST_PREFIX}."* ]]; then
+		rm -f -- "$stage_list"
+	fi
+	return "$rc"
+}
+trap cleanup_stage_list EXIT
+stage_list=$(mktemp "${TMPDIR:-/tmp}/${STAGE_LIST_PREFIX}.XXXXXX")
+git ls-files --stage -z >"$stage_list"
+shell_files=()
+while IFS= read -r -d '' entry; do
+	path="${entry#*$'\t'}"
+	mode="${entry%% *}"
+	is_repo_shell_path "$path" || continue
+	if [ "$mode" = "$SHELL_SYMLINK_MODE" ] || [ -L "$path" ]; then
+		printf 'scripts/check: shell symlink is not allowed: %s\n' "$path" >&2
+		exit 1
+	fi
+	if [[ "$SHELL_REGULAR_MODES" == *" $mode "* ]] && [ -f "$path" ]; then
+		shell_files+=("$path")
+	fi
+done <"$stage_list"
+cleanup_stage_list
+stage_list=''
+if [ "${#shell_files[@]}" -eq 0 ]; then
+	printf 'scripts/check: expected tracked shell scripts, found none\n' >&2
+	exit 1
+fi
+run_step 'shell analysis' "$local_timeout" shellcheck -x -- "${shell_files[@]}"
+run_step 'shell format' "$local_timeout" shfmt -d -- "${shell_files[@]}"
 run_step 'static analysis' "$local_timeout" semgrep scan --config .githooks/lib/semgrep --error --metrics off --disable-version-check --no-git-ignore bb-plugin-theme-builder/src bb-plugin-theme-builder/server.ts bb-plugin-theme-builder/app.tsx
 run_step 'markdown' "$local_timeout" markdownlint-cli2 --config .githooks/lib/markdownlint.jsonc README.md bb-plugin-theme-builder/README.md bb-plugin-theme-builder/PLUGIN_OVERVIEW.md
 # The existing journey verifies the server's canonical data root before any appearance mutation.

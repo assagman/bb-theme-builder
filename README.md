@@ -18,25 +18,28 @@ pull requests unless the owner requests them. Keep changes focused. Sign every
 commit with DCO and include a Conventional Commit subject and a purpose-focused
 body.
 
-Use Node 24 LTS, npm, BB, and the tools below:
+Use mise, Node 24 LTS, npm, BB, and the tools below:
 
 - Gitleaks, Semgrep, OSV-Scanner, Lizard, ShellCheck, shfmt, and
   markdownlint-cli2.
 - BB installed, and Google Chrome or Chromium, for the browser smoke journey.
 - A signing key that Git can verify without changing repository configuration.
 
-After cloning, review the locked dependencies and install them:
+After cloning, trust and install the pinned tools from `mise.toml`, review the
+locked dependencies, install them, and turn on the repository hooks:
 
 ```sh
+mise trust
+mise install
 cd bb-plugin-theme-builder
 npm ci --ignore-scripts
 cd ..
 scripts/setup-hooks
 ```
 
-Hook setup installs clone-local forwarding scripts. It does not change Git
-configuration or replace unrelated hooks. An existing `core.hooksPath` or an
-unrecognized active hook stops setup for manual integration.
+`scripts/setup-hooks` sets clone-local `core.hooksPath=.githooks` so Git runs
+the repository's committed hooks directly. It never changes global Git
+configuration.
 
 ## Local checks
 
@@ -86,8 +89,11 @@ npm run smoke:randomizer
 
 ## Delivery gates
 
-- `pre-commit` scans staged secrets and whitespace, checks Markdown, and runs
-  formatting and lint against an indexed copy rather than unstaged content.
+- `pre-commit` scans staged secrets and whitespace, checks Markdown, checks
+  formatting and linting of indexed package files and
+  `scripts/verify-test-environment.mjs` with Biome, and runs ShellCheck and
+  `shfmt` on staged repo-owned shell scripts against an indexed copy rather than
+  unstaged content.
 - `commit-msg` requires the commit convention, a body, and DCO.
 - `pre-push` verifies signatures, DCO, messages, and secrets for outgoing
   commits. Shared checks also scan changed lockfile revisions, source, and

@@ -1,0 +1,9 @@
+[tools]
+# Pinned runtime and shell/Markdown check tools so every contributor and hook
+# run resolves the same versions.
+# Node 24 LTS ("Krypton"): 24.22.3 carries the 2026-11-11 security release.
+node = "24.22.3"
+# Vetted stable releases clearing the seven-day release-age gate.
+markdownlint-cli2 = "0.24.1"
+shellcheck = "0.11.0"
+shfmt = "3.14.1"

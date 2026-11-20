@@ -3,14 +3,29 @@
 set -euo pipefail
 # shellcheck source=.githooks/lib/helpers.sh
 . "${HOOK_HELPERS:?run through the repository pre-push hook}"
-pushed_shas <"${HOOK_STDIN_FILE:?missing push ref lines}" >/dev/null
+# Validate ref lines even when a caller omits the last newline. A remote
+# branch can acquire a new tip without adding any commits to the remote.
+{
+	cat -- "${HOOK_STDIN_FILE:?missing push ref lines}" || exit 1
+	printf '\n'
+} | pushed_shas >/dev/null
 readonly check_timeout=600
-tips=' '
-while read -r _local_ref local_sha _remote_ref _remote_sha; do
+repo_root="$(cd -- "$(git rev-parse --show-toplevel)" && pwd -P)"
+seen=' '
+tips=()
+while read -r _local_ref local_sha _remote_ref _remote_sha || [ -n "${local_sha:-}" ]; do
 	[[ -n "$local_sha" ]] || continue
 	is_null_oid "$local_sha" && continue
-	tip=$(git rev-parse --verify "${local_sha}^{commit}")
-	case "$tips" in *" $tip "*) continue ;; esac
-	tips+="$tip "
-	run_step "project tip checks" "$check_timeout" at_sha "$tip" bash scripts/check
+	if ! tip=$(git rev-parse --verify "${local_sha}^{commit}" 2>/dev/null); then
+		printf 'pre-push: unable to resolve pushed commit %s\n' "$local_sha" >&2
+		exit 1
+	fi
+	case "$seen" in *" $tip "*) continue ;; esac
+	seen+="$tip "
+	tips+=("$tip")
 done <"$HOOK_STDIN_FILE"
+
+[ "${#tips[@]}" -gt 0 ] || exit 0
+for tip in "${tips[@]}"; do
+	run_step "project tip checks" "$check_timeout" at_sha "$tip" env CHECK_TOOL_ROOT="$repo_root" bash scripts/check </dev/null
+done
