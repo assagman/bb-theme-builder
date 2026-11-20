@@ -296,6 +296,10 @@ exclude a hostile OS process replacing ancestor directories during an operation.
 
 ## Browser verification
 
+`scripts/check` at the repository root does all of this for you with a
+throwaway runtime (`scripts/disposable-runtime`). Use the steps below only to
+drive the journeys by hand.
+
 `tests/theme-builder.e2e.ts` and `tests/randomizer.e2e.ts` drive the real built
 plugin using Chrome DevTools Protocol and Node’s WebSocket implementation,
 without a new browser dependency. Start a separate bb server with temporary

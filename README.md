@@ -22,7 +22,7 @@ Use Node 24 LTS, npm, BB, and the tools below:
 
 - Gitleaks, Semgrep, OSV-Scanner, Lizard, ShellCheck, shfmt, and
   markdownlint-cli2.
-- A separate BB server and browser for the automated smoke journey.
+- BB installed, and Google Chrome or Chromium, for the browser smoke journey.
 - A signing key that Git can verify without changing repository configuration.
 
 After cloning, review the locked dependencies and install them:
@@ -55,24 +55,24 @@ npm audit
 The lockfile pins the dependency graph. New tooling and security fixes use exact
 versions. `.npmrc` enforces a seven-day release age on supporting npm versions.
 
-For the complete checks, first start the disposable server and browser described
-in the
-[browser verification guide](bb-plugin-theme-builder/README.md#browser-verification).
-Set their actual values before running this command from the repository root:
+Run the complete checks from the repository root:
 
 ```sh
-export BB_DATA_DIR=/tmp/bb-theme-builder-dev
-export BB_SERVER_URL=http://127.0.0.1:48986
-export BB_HOST_DAEMON_PORT=48987
-export BB_THEME_TEST_CDP=ws://127.0.0.1:DEBUG_PORT/devtools/browser/SESSION_ID
-export BB_THEME_TEST_ARTIFACTS=/tmp/theme-builder-evidence
 scripts/check
 ```
 
-Replace the browser endpoint with the actual endpoint. Use a fresh evidence
-directory. The check script verifies the live server data directory before it
-installs the plugin. It refuses non-loopback endpoints and non-temporary data.
-Never point verification commands at a production instance.
+`scripts/check` starts a throwaway BB server and an off-screen browser through
+`scripts/disposable-runtime`. They use temporary data under `/tmp` and free
+loopback ports, and both are removed when the check ends. The BB you use day to
+day is never touched. The check script still verifies the live server data
+directory before it installs the plugin, and refuses non-loopback endpoints and
+non-temporary data.
+
+To check against a runtime you started yourself, as described in the
+[browser verification guide](bb-plugin-theme-builder/README.md#browser-verification),
+set `BB_DATA_DIR`, `BB_SERVER_URL`, `BB_HOST_DAEMON_PORT`, `BB_THEME_TEST_CDP`
+and `BB_THEME_TEST_ARTIFACTS` first. Never point verification commands at a
+production instance.
 
 The complete checks include lint, types, existing tests, duplication, dependency
 advisories, build, shell analysis, static analysis, Markdown lint, and browser

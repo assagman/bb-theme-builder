@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# Runs a command against a bb server and browser that exist only for that
+# command, so the browser checks never touch a real bb and need no manual
+# setup. Everything lives in one temporary directory on loopback ports and is
+# removed on exit. scripts/check calls this when no runtime is configured.
+#
+# Usage: scripts/disposable-runtime <command> [args...]
+# Overrides: BB_APP_DIR (bb-app package root), BB_THEME_TEST_CHROME (browser).
+set -euo pipefail
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+# shellcheck source=.githooks/lib/helpers.sh
+. "$root/.githooks/lib/helpers.sh"
+
+readonly START_TRIES=120
+readonly STOP_GRACE_SECONDS=2
+readonly LOG_TAIL_LINES=40
+readonly OFFSCREEN_POSITION=-2400,-2400
+# Per-request limits, so a port that accepts but never answers cannot stall
+# the start loop or the setup write.
+readonly PROBE_TIMEOUT_SECONDS=2
+readonly SETUP_TIMEOUT_SECONDS=10
+readonly SCRATCH_PREFIX=bb-theme-runtime
+readonly MAC_BB_APP=/Applications/bb.app/Contents/Resources/app.asar.unpacked/node_modules/bb-app
+readonly MAC_CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+# Any past timestamp: a fresh data directory opens bb's first-run guide over
+# every page until this setting is present.
+readonly ONBOARDED_AT=2026-01-01T00:00:00.000Z
+
+[[ $# -gt 0 ]] || {
+	echo "usage: scripts/disposable-runtime <command> [args...]" >&2
+	exit 2
+}
+
+fail() {
+	echo "disposable-runtime: $*" >&2
+	exit 1
+}
+
+# The bb on PATH lives in <bb-app>/host-daemon/dist, so its package root is
+# three levels up; the macOS app bundle is the fallback.
+bb_app_dir() {
+	local cli
+	if [[ -n "${BB_APP_DIR:-}" ]]; then
+		printf '%s\n' "$BB_APP_DIR"
+	elif cli=$(command -v bb) && [[ -f "$(dirname -- "$(realpath -- "$cli")")/../../dist/bb-app.js" ]]; then
+		realpath -- "$(dirname -- "$(realpath -- "$cli")")/../.."
+	else
+		printf '%s\n' "$MAC_BB_APP"
+	fi
+}
+
+chrome_bin() {
+	local candidate
+	for candidate in "${BB_THEME_TEST_CHROME:-}" "$MAC_CHROME" google-chrome chromium; do
+		[[ -n "$candidate" ]] || continue
+		if [[ -x "$candidate" ]]; then
+			printf '%s\n' "$candidate"
+			return 0
+		fi
+		command -v "$candidate" && return 0
+	done
+	return 1
+}
+
+# Free loopback ports chosen by the kernel, so parallel runs cannot collide.
+free_ports() {
+	node -e '
+const net = require("node:net");
+const take = () => new Promise((ok) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => ok(s)); });
+Promise.all([take(), take(), take()]).then((all) => {
+  console.log(all.map((s) => s.address().port).join(" "));
+  all.forEach((s) => s.close());
+});'
+}
+
+command -v bb >/dev/null || fail "the bb CLI is not on PATH"
+app=$(bb_app_dir)
+[[ -f "$app/dist/bb-app.js" ]] || fail "bb is not installed (no $app/dist/bb-app.js); set BB_APP_DIR"
+chrome=$(chrome_bin) || fail "Chrome or Chromium is missing; set BB_THEME_TEST_CHROME"
+read -r server_port daemon_port cdp_port < <(free_ports)
+
+# /tmp, not $TMPDIR: the browser journeys accept data only under /tmp.
+work=$(mktemp -d "/tmp/$SCRATCH_PREFIX.XXXXXX")
+pids=()
+cleanup() {
+	local rc=$? pid
+	# The logs go with the directory, so show them while a failure is fresh.
+	if [[ $rc -ne 0 ]]; then
+		tail -n "$LOG_TAIL_LINES" "$work/bb.log" "$work/chrome.log" >&2 2>/dev/null || true
+	fi
+	for pid in ${pids[@]+"${pids[@]}"}; do kill -TERM -- "-$pid" 2>/dev/null || true; done
+	sleep "$STOP_GRACE_SECONDS"
+	for pid in ${pids[@]+"${pids[@]}"}; do kill -KILL -- "-$pid" 2>/dev/null || true; done
+	# Only this run's own mktemp directory is removed.
+	if [[ -d "$work" && "${work##*/}" == "$SCRATCH_PREFIX".* ]]; then
+		rm -rf -- "$work"
+	fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# bb makes <data>/theme on its first theme save; the smoke resolves it first.
+mkdir -p "$work/data/theme" "$work/browser" "$work/artifacts"
+# Job control gives each child its own process group, so cleanup stops the
+# whole tree each one starts.
+set -m
+BB_TELEMETRY=false NODE_ENV=production node "$app/dist/bb-app.js" \
+	--data-dir "$work/data" --server-port "$server_port" \
+	--host-daemon-port "$daemon_port" --bundled >"$work/bb.log" 2>&1 &
+pids+=("$!")
+# Headed but parked off-screen: headless Chrome on macOS has been seen to exit
+# by itself mid-run, and the package README asks for a headed browser anyway.
+"$chrome" --window-position="$OFFSCREEN_POSITION" --remote-debugging-port="$cdp_port" \
+	--user-data-dir="$work/browser" --no-first-run --no-default-browser-check \
+	--disable-background-timer-throttling \
+	--disable-backgrounding-occluded-windows \
+	--disable-renderer-backgrounding about:blank >"$work/chrome.log" 2>&1 &
+pids+=("$!")
+set +m
+
+export BB_DATA_DIR="$work/data"
+export BB_SERVER_URL="http://127.0.0.1:$server_port"
+export BB_HOST_DAEMON_PORT="$daemon_port"
+export BB_THEME_TEST_ARTIFACTS="$work/artifacts"
+
+cdp=''
+for ((try = 0; try < START_TRIES; try++)); do
+	if curl -fsS --max-time "$PROBE_TIMEOUT_SECONDS" "$BB_SERVER_URL/api/v1/system/config" >/dev/null 2>&1; then
+		cdp=$(curl -fsS --max-time "$PROBE_TIMEOUT_SECONDS" "http://127.0.0.1:$cdp_port/json/version" 2>/dev/null |
+			node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>{try{console.log(JSON.parse(s).webSocketDebuggerUrl??"")}catch{}})') || cdp=''
+		[[ -n "$cdp" ]] && break
+	fi
+	sleep 1
+done
+if [[ -z "$cdp" ]]; then
+	fail "the bb server or the browser did not start"
+fi
+export BB_THEME_TEST_CDP="$cdp"
+
+# The settings endpoint takes the whole object: read it, set the one field,
+# and write it back to this server only.
+general=$(run_with_timeout "$SETUP_TIMEOUT_SECONDS" bb settings show --json | node -e '
+let s = "";
+process.stdin.on("data", (d) => (s += d)).on("end", () => {
+  const general = JSON.parse(s).generalSettings;
+  delete general.showDiagnosticEvents;
+  general.onboardingCompletedAt = process.argv[1];
+  console.log(JSON.stringify(general));
+});' "$ONBOARDED_AT")
+curl -fsS --max-time "$SETUP_TIMEOUT_SECONDS" -X PUT -H 'content-type: application/json' -d "$general" \
+	"$BB_SERVER_URL/api/v1/settings/general" >/dev/null ||
+	fail "cannot finish bb's first-run setup"
+
+echo "disposable-runtime: bb at $BB_SERVER_URL, data in $BB_DATA_DIR" >&2
+"$@"
