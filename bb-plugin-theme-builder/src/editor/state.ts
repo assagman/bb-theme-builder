@@ -149,11 +149,12 @@ export function useBuilderState() {
     clearDraft();
     return next;
   }
+  /** Built-in themes the server cannot describe are answered locally; the rest come from the server. */
+  async function loadView(id: string): Promise<ThemeView> {
+    return unaskableView(id) ?? (await rpc.call("getTheme", { id }));
+  }
   async function open(id: string) {
-    const next = adopt(
-      unaskableView(id) ?? (await rpc.call("getTheme", { id })),
-    );
-    await refreshHistory(next);
+    await refreshHistory(adopt(await loadView(id)));
   }
 
   // With no restored draft and nothing picked yet, the page starts on the theme bb is using.
@@ -166,7 +167,17 @@ export function useBuilderState() {
       !sameDraft(readEditor("draft"), INITIAL_SOURCE.loaded)
     )
       return;
-    void run(() => open(activeId));
+    const startDraft = readEditor("draft");
+    void run(async () => {
+      const view = await loadView(activeId);
+      // The user may have edited while the theme loaded; their edit wins over this default, as it does over a restored draft.
+      if (
+        readEditor("draft") !== startDraft ||
+        readEditor("source") !== INITIAL_SOURCE
+      )
+        return;
+      await refreshHistory(adopt(view));
+    });
   }, [phase, activeId]);
 
   /** Shared ending of Overwrite, Save as new, Undo and Redo: the file on disk becomes the working copy. */
