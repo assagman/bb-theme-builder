@@ -16,6 +16,7 @@ set -euo pipefail
 readonly CHECK_TIMEOUT_SECONDS=60
 # Prefix verified before cleanup deletes this run's temporary index export.
 readonly SCRATCH_PREFIX='theme-shell-staged'
+readonly PIN_FILE=mise.toml
 
 repo_root="$(cd -- "$(git rev-parse --show-toplevel)" && pwd -P)"
 cd -- "$repo_root"
@@ -54,6 +55,18 @@ cleanup() {
 }
 trap cleanup EXIT
 install_signal_traps
+
+# A pin-only commit must select the same toolchain as the index it records.
+pin_entry=$(staged_git ls-files --stage -- "$PIN_FILE")
+pin_mode=${pin_entry%% *}
+if [[ "$SHELL_REGULAR_MODES" != *" $pin_mode "* ]] || [[ ! -f "$PIN_FILE" || -L "$PIN_FILE" ]]; then
+	printf 'pre-commit: expected regular indexed and working %s files\n' "$PIN_FILE" >&2
+	exit 1
+fi
+if ! staged_git cat-file blob ":0:$PIN_FILE" | cmp -s -- - "$PIN_FILE"; then
+	printf 'pre-commit: staged %s differs from the working file; reconcile tool pins before committing\n' "$PIN_FILE" >&2
+	exit 1
+fi
 
 raw_diff="$scratch/diff-raw"
 staged_git diff --cached --raw -z --no-renames --diff-filter=ACMT >"$raw_diff"
